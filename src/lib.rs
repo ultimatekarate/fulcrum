@@ -28,6 +28,11 @@
 //!   `Safe<G, N>`. Component-wise gauge interpretation: per-machine
 //!   utilization is reduced by `max_d`, then sorted and Ky Fan-ed across
 //!   machines. Joint multi-dim gauges are deferred.
+//! - **Reference planners** (Phase 3): [`planner::LeastLoaded`],
+//!   [`planner::PowerOfTwo`], [`planner::MaxMinFair`],
+//!   [`planner::BestFitDecreasing`]. Each implements the
+//!   [`planner::Planner`] trait, emitting a [`planner::TypedMove`] per
+//!   `step` call.
 //!
 //! ## Stability
 //!
@@ -38,6 +43,7 @@ pub mod alphabet;
 pub mod gauge;
 pub mod load;
 pub mod move_kind;
+pub mod planner;
 pub mod replay;
 pub mod safe;
 pub mod trace;
@@ -46,5 +52,8 @@ pub use alphabet::{Derived, Effect, Primitive};
 pub use gauge::{Gauge, Linfty, SchurConvex, SumTopK, WeightedKyFan};
 pub use load::{Fleet, MachineId, MachineSpec, Mass};
 pub use move_kind::{ColdToHot, HotToCold, Neutral, Place, Remove};
+pub use planner::{
+    BestFitDecreasing, LeastLoaded, MaxMinFair, Planner, PowerOfTwo, TypedMove,
+};
 pub use safe::{GaugeError, Safe};
 pub use trace::{MoveHistory, MoveRecord};

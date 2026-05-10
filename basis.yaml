@@ -1,14 +1,18 @@
 governance:
   version: "1.0"
 
-# Fulcrum's internal layering. Three layers, ordered by what may import what:
+# Fulcrum's internal layering. Four layers, ordered by what may import what:
 #
 #   dictionary: pure data types, gauge declarations, the sealed Primitive
 #               trait. The smallest possible foundation. May import nothing
 #               from inside fulcrum (depends on std types only).
 #
 #   laboratory: pure logic — gauge evaluation, witness construction, apply
-#               impls, the typestate `Safe<G>`. May import dictionary.
+#               impls, the typestate `Safe<G, N>`. May import dictionary.
+#
+#   planners:   reference scheduler implementations. Strictly above
+#               laboratory; consumes the move alphabet and Safe<G, N>.
+#               Pure (no IO); randomness must be deterministically seeded.
 #
 #   hands:      IO-touching code. CSV parsing, replay support. May import
 #               anywhere. The only layer permitted to do file_io.
@@ -34,6 +38,18 @@ layers:
       purity: strict
     depends_on: [dictionary]
 
+  planners:
+    role: "Reference scheduler implementations"
+    packages:
+      - "src/planner.rs"
+      - "src/planner/least_loaded.rs"
+      - "src/planner/power_of_two.rs"
+      - "src/planner/max_min_fair.rs"
+      - "src/planner/best_fit_decreasing.rs"
+    rules:
+      purity: strict
+    depends_on: [dictionary, laboratory]
+
   hands:
     role: "IO, parsing, replay support"
     packages:
@@ -46,10 +62,11 @@ layers:
 newtypes:
   enabled: true
   exclude_params: [index, count, offset, len, capacity, threshold]
-  exclude_functions: [len, default, is_empty, capacity]
+  exclude_functions: [len, default, is_empty, capacity, zero, is_zero]
   types:
     - name: Mass
-      wraps: u64
+      wraps: "[u64; N]"
+      const_generic: N
     - name: MachineId
       wraps: u64
 
@@ -86,6 +103,13 @@ exhaustive_matching:
       variants:
         - UnknownMachine
         - InsufficientLoad
+    - name: TypedMove
+      variants:
+        - Remove
+        - HotToCold
+        - Neutral
+        - ColdToHot
+        - Place
 
 # The dictionary and laboratory layers must be pure. The hands layer is
 # allowed to do IO. tests/ and examples/ are not bound by these rules.
