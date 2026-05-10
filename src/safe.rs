@@ -215,10 +215,10 @@ mod tests {
     use crate::load::{Fleet, MachineId, Mass};
 
     fn fleet_3x100_loads(a: u64, b: u64, c: u64) -> Fleet {
-        let mut f = Fleet::new(100);
-        f.add_machine(MachineId(1), a);
-        f.add_machine(MachineId(2), b);
-        f.add_machine(MachineId(3), c);
+        let mut f = Fleet::new();
+        f.add_machine(MachineId(1), 100, a);
+        f.add_machine(MachineId(2), 100, b);
+        f.add_machine(MachineId(3), 100, c);
         f
     }
 

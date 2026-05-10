@@ -67,23 +67,35 @@ pub struct HotToCold {
 }
 
 impl HotToCold {
-    /// Construct a `HotToCold` if and only if the move is a valid
-    /// (general) Pigou-Dalton transfer against `fleet`:
+    /// Construct a `HotToCold` if and only if the move is weak-super-
+    /// majorization-decreasing on the utilization vector against `fleet`:
     ///
     /// 1. Both machines exist and `source ≠ destination`.
-    /// 2. Source utilization > destination utilization (the transfer goes
-    ///    in the rich → poor direction).
-    /// 3. The transferred mass does not exceed the gap between source and
-    ///    destination: `mass ≤ load_src - load_dst`.
+    /// 2. Source utilization > destination utilization (rich → poor on
+    ///    utilization, not on raw load).
+    /// 3. `cap(src) ≤ cap(dst)` — transfer to a same-or-larger machine.
+    ///    A load transfer of mass `m` decreases source utilization by
+    ///    `m/cap(src)` and increases destination utilization by
+    ///    `m/cap(dst)`. The two are equal only when capacities match;
+    ///    otherwise the move shifts the sum of utilizations. When
+    ///    `cap(src) ≤ cap(dst)`, the source-side decrease dominates the
+    ///    destination-side increase, and the resulting vector is
+    ///    weak-super-majorized by the original. When `cap(src) > cap(dst)`
+    ///    the move can increase top-k sums even with `util(src) >
+    ///    util(dst)` — counterexample: caps `(100, 10)`, loads `(80, 5)`,
+    ///    utils `(0.80, 0.50)`; transferring mass 1 yields utils `(0.79,
+    ///    0.60)`, and `SumTopK<2>` increases from 1.30 to 1.39. So
+    ///    high-to-low-cap transfers fall through to the catch-all path.
+    /// 4. `mass ≤ cap(dst) · (util(src) − util(dst))` — the transferred
+    ///    destination-side utilization does not exceed the rich-poor gap.
+    ///    Equivalently in integer arithmetic: `mass · cap(src) ≤
+    ///    load(src) · cap(dst) − load(dst) · cap(src)`. This ensures the
+    ///    new destination utilization is at most the old source
+    ///    utilization, so no coordinate exceeds the previous max.
     ///
-    /// Condition 3 is the *general* Pigou-Dalton condition. It is sufficient
-    /// for the resulting load vector to be majorized by the original — the
-    /// transfer may overshoot the midpoint and flip the relative order of
-    /// source and destination, but the result is still majorized as long as
-    /// `mass ≤ load_src - load_dst`. The stricter "preserve order"
-    /// condition `mass ≤ (load_src - load_dst) / 2` is sufficient but not
-    /// necessary, and we use the looser one to admit more legitimately
-    /// majorization-decreasing transfers.
+    /// When `cap(src) = cap(dst) = c`, conditions 3 and 4 collapse to the
+    /// uniform-capacity rule `mass ≤ load(src) − load(dst)`, recovering
+    /// the v0 witness.
     pub fn witness(
         source: MachineId,
         destination: MachineId,
@@ -93,15 +105,25 @@ impl HotToCold {
         if source == destination {
             return None;
         }
-        let load_src = fleet.load(source)?;
-        let load_dst = fleet.load(destination)?;
-        if load_src <= load_dst {
+        let src_spec = fleet.spec(source)?;
+        let dst_spec = fleet.spec(destination)?;
+        if src_spec.capacity == 0 || dst_spec.capacity == 0 {
             return None;
         }
-        // v0: uniform capacity, so utilization comparison reduces to load
-        // comparison. The order-preservation condition is mass ≤ load_src -
-        // load_dst.
-        if mass.0 > load_src - load_dst {
+        if src_spec.capacity > dst_spec.capacity {
+            return None;
+        }
+        // util(src) > util(dst) ⟺ load(src)·cap(dst) > load(dst)·cap(src).
+        // Use u128 to keep the cross product exact for u64 inputs.
+        let load_src_x_cap_dst = src_spec.load as u128 * dst_spec.capacity as u128;
+        let load_dst_x_cap_src = dst_spec.load as u128 * src_spec.capacity as u128;
+        if load_src_x_cap_dst <= load_dst_x_cap_src {
+            return None;
+        }
+        // mass·cap(src) ≤ load(src)·cap(dst) − load(dst)·cap(src).
+        let gap = load_src_x_cap_dst - load_dst_x_cap_src;
+        let mass_x_cap_src = mass.0 as u128 * src_spec.capacity as u128;
+        if mass_x_cap_src > gap {
             return None;
         }
         Some(HotToCold {
@@ -129,8 +151,19 @@ pub struct Neutral {
 }
 
 impl Neutral {
-    /// Construct a `Neutral` move if and only if source and destination have
-    /// equal load (under uniform capacity, this is equal utilization).
+    /// Construct a `Neutral` move if and only if source and destination
+    /// have equal *capacity* and equal *load* (and therefore equal
+    /// utilization). Equal capacity is required because the Permutation
+    /// effect claims the post-move utilization vector is a coordinate
+    /// permutation of the pre-move vector. Under heterogeneous capacity,
+    /// a load transfer of mass `m` shifts source utilization by
+    /// `−m/cap(src)` and destination utilization by `+m/cap(dst)`. The
+    /// two are equal only when `cap(src) = cap(dst)`; otherwise the move
+    /// is no longer a permutation (sum of utilizations changes). Such
+    /// migrations between equal-utilization but unequal-capacity machines
+    /// can still be typed-pure via [`HotToCold::witness`] (the witness
+    /// admits transfers from smaller to larger machines), or through
+    /// the catch-all path otherwise.
     pub fn witness(
         source: MachineId,
         destination: MachineId,
@@ -140,12 +173,15 @@ impl Neutral {
         if source == destination {
             return None;
         }
-        let load_src = fleet.load(source)?;
-        let load_dst = fleet.load(destination)?;
-        if load_src != load_dst {
+        let src_spec = fleet.spec(source)?;
+        let dst_spec = fleet.spec(destination)?;
+        if src_spec.capacity != dst_spec.capacity {
             return None;
         }
-        if mass.0 > load_src {
+        if src_spec.load != dst_spec.load {
+            return None;
+        }
+        if mass.0 > src_spec.load {
             return None;
         }
         Some(Neutral {
@@ -217,10 +253,17 @@ impl Sealed for HotToCold {}
 impl Primitive for HotToCold {
     const EFFECT: Effect = Effect::PigouDalton;
     const THEOREM: &'static str =
-        "Hardy-Littlewood-Pólya 1929; Marshall-Olkin §1.A.1: a Pigou-Dalton \
-         transfer (rich → poor with mass ≤ load_src - load_dst) is \
-         majorization-decreasing, hence non-increasing for any Schur-convex \
-         gauge.";
+        "Hardy-Littlewood-Pólya 1929; Marshall-Olkin §1.A.1, §3.A.8. \
+         Under heterogeneous capacity the witness conditions \
+         (cap(src) ≤ cap(dst); mass·cap(src) ≤ load(src)·cap(dst) − \
+         load(dst)·cap(src)) decompose the load transfer into (i) a \
+         T-transform of size mass/cap(dst) on the utilization vector \
+         (Pigou-Dalton on src and dst, sum-preserving), composed with \
+         (ii) a mass-decrease at src of size mass·(1/cap(src) − \
+         1/cap(dst)) ≥ 0. Both pieces are weak-super-majorization \
+         decreasing on non-negative vectors; their composition is \
+         non-increasing for every monotone Schur-convex gauge — the \
+         Ky Fan family covered by the seal.";
     const NAME: &'static str = "HotToCold";
 }
 
@@ -228,10 +271,12 @@ impl Sealed for Neutral {}
 impl Primitive for Neutral {
     const EFFECT: Effect = Effect::Permutation;
     const THEOREM: &'static str =
-        "Symmetric gauges are invariant under coordinate permutation. A \
-         mass-preserving exchange between equally-loaded coordinates \
-         produces a load vector that is a permutation of the original \
-         within the equal-utilization class; gauge value unchanged.";
+        "Symmetric gauges are invariant under coordinate permutation. The \
+         witness requires equal capacity AND equal load at source and \
+         destination, so the post-transfer utilization vector is a \
+         coordinate transposition of the pre-transfer vector within the \
+         equal-utilization class. Schur-convex gauges (here, the Ky Fan \
+         family) are symmetric, so the gauge value is unchanged.";
     const NAME: &'static str = "Neutral";
 }
 

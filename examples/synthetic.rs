@@ -11,10 +11,10 @@ use fulcrum::{
 
 fn main() {
     // Three machines, capacity 100 each, with a hot-spot at machine 1.
-    let mut fleet = Fleet::new(100);
-    fleet.add_machine(MachineId(1), 80);
-    fleet.add_machine(MachineId(2), 30);
-    fleet.add_machine(MachineId(3), 30);
+    let mut fleet = Fleet::new();
+    fleet.add_machine(MachineId(1), 100, 80);
+    fleet.add_machine(MachineId(2), 100, 30);
+    fleet.add_machine(MachineId(3), 100, 30);
 
     let threshold = 0.85;
     let safe: Safe<Linfty> = Safe::new(fleet, threshold)

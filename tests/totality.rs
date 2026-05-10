@@ -8,8 +8,8 @@
 use fulcrum::{Fleet, HotToCold, Linfty, MachineId, Mass, Neutral, Remove, Safe};
 
 fn one_machine(load: u64) -> Fleet {
-    let mut f = Fleet::new(100);
-    f.add_machine(MachineId(1), load);
+    let mut f = Fleet::new();
+    f.add_machine(MachineId(1), 100, load);
     f
 }
 
@@ -23,9 +23,9 @@ fn remove_apply_returns_safe_directly() {
 
 #[test]
 fn hot_to_cold_apply_returns_safe_directly() {
-    let mut f = Fleet::new(100);
-    f.add_machine(MachineId(1), 80);
-    f.add_machine(MachineId(2), 30);
+    let mut f = Fleet::new();
+    f.add_machine(MachineId(1), 100, 80);
+    f.add_machine(MachineId(2), 100, 30);
     let safe: Safe<Linfty> = Safe::new(f, 0.9).unwrap();
 
     let m = HotToCold::witness(MachineId(1), MachineId(2), Mass(20), safe.fleet()).unwrap();
@@ -37,9 +37,9 @@ fn hot_to_cold_apply_returns_safe_directly() {
 
 #[test]
 fn neutral_apply_returns_safe_directly() {
-    let mut f = Fleet::new(100);
-    f.add_machine(MachineId(1), 50);
-    f.add_machine(MachineId(2), 50);
+    let mut f = Fleet::new();
+    f.add_machine(MachineId(1), 100, 50);
+    f.add_machine(MachineId(2), 100, 50);
     let safe: Safe<Linfty> = Safe::new(f, 0.9).unwrap();
 
     let m = Neutral::witness(MachineId(1), MachineId(2), Mass(10), safe.fleet()).unwrap();
@@ -50,9 +50,24 @@ fn neutral_apply_returns_safe_directly() {
 
 #[test]
 fn neutral_witness_rejects_unequal_loads() {
-    let mut f = Fleet::new(100);
-    f.add_machine(MachineId(1), 50);
-    f.add_machine(MachineId(2), 51);
+    let mut f = Fleet::new();
+    f.add_machine(MachineId(1), 100, 50);
+    f.add_machine(MachineId(2), 100, 51);
     let w = Neutral::witness(MachineId(1), MachineId(2), Mass(1), &f);
     assert!(w.is_none(), "Neutral witness should reject unequal loads");
+}
+
+#[test]
+fn neutral_witness_rejects_unequal_capacities() {
+    // Equal utilization but unequal capacity → not a permutation.
+    // load_src=50, cap_src=100 → util 0.5. load_dst=100, cap_dst=200 → util 0.5.
+    // A load transfer would shift utilization asymmetrically; reject.
+    let mut f = Fleet::new();
+    f.add_machine(MachineId(1), 100, 50);
+    f.add_machine(MachineId(2), 200, 100);
+    let w = Neutral::witness(MachineId(1), MachineId(2), Mass(10), &f);
+    assert!(
+        w.is_none(),
+        "Neutral witness should reject unequal capacities even at equal utilization"
+    );
 }
