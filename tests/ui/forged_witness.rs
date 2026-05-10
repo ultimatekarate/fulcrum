@@ -9,9 +9,9 @@
 use fulcrum::{HotToCold, MachineId, Mass};
 
 fn main() {
-    let _forged = HotToCold {
+    let _forged: HotToCold<1> = HotToCold {
         source: MachineId(1),
         destination: MachineId(2),
-        mass: Mass(10),
+        mass: Mass([10]),
     };
 }

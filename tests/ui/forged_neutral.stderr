@@ -1,7 +1,7 @@
-error: cannot construct `fulcrum::Neutral` with struct literal syntax due to private fields
- --> tests/ui/forged_neutral.rs:6:19
+error: cannot construct `fulcrum::Neutral<_>` with struct literal syntax due to private fields
+ --> tests/ui/forged_neutral.rs:6:31
   |
-6 |     let _forged = Neutral {
-  |                   ^^^^^^^
+6 |     let _forged: Neutral<1> = Neutral {
+  |                               ^^^^^^^
   |
   = note: ...and other private field `_witness` that was not provided

@@ -38,7 +38,7 @@ fn main() {
     eprintln!("  {} state-changing events, {} rows dropped", events.len(), dropped);
 
     eprintln!("Pass 2: classifying and applying through the framework ...");
-    let result = match classify_and_apply::<Linfty>(events, CAPACITY) {
+    let result = match classify_and_apply::<Linfty<1>>(events, CAPACITY) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: {:?}", e);

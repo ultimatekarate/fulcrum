@@ -3,9 +3,9 @@
 use fulcrum::{MachineId, Mass, Neutral};
 
 fn main() {
-    let _forged = Neutral {
+    let _forged: Neutral<1> = Neutral {
         source: MachineId(1),
         destination: MachineId(2),
-        mass: Mass(10),
+        mass: Mass([10]),
     };
 }

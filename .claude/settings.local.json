@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build *)",
+      "Bash(cargo run *)",
+      "Bash(git -C C:/Users/joevo/git-repo/fulcrum/.claude/worktrees/interesting-greider-4b2843 status)",
+      "Bash(git -C C:/Users/joevo/git-repo/fulcrum status --short)",
+      "Bash(git -C C:/Users/joevo/git-repo/fulcrum diff src/gauge.rs src/load.rs)",
+      "Bash(git -C C:/Users/joevo/git-repo/fulcrum diff src/load.rs)",
+      "Bash(git -C C:/Users/joevo/git-repo/fulcrum/.claude/worktrees/interesting-greider-4b2843 add README.md examples/synthetic.rs src/gauge.rs src/lib.rs src/load.rs src/move_kind.rs src/replay.rs src/safe.rs tests/alphabet.rs tests/composition.rs tests/seeded_bugs.rs tests/totality.rs tests/heterogeneous.rs)",
+      "Bash(git -C C:/Users/joevo/git-repo/fulcrum/.claude/worktrees/interesting-greider-4b2843 status --short)",
+      "Bash(git -C C:/Users/joevo/git-repo/fulcrum diff HEAD -- src/gauge.rs src/load.rs)",
+      "Bash(cargo test *)"
+    ]
+  }
+}

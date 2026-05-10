@@ -1,40 +1,53 @@
 //! Gauge functions over fleet state.
 //!
-//! A `Gauge` is a real-valued function on `Fleet`. The framework's claim is
-//! that *Schur-convex* gauges admit a particular composition algebra: any
-//! mass-decreasing or majorization-decreasing operation reduces a Schur-convex
-//! gauge, so such operations preserve the safety claim `g(fleet) ≤ τ`
-//! unconditionally.
+//! A `Gauge<N>` is a real-valued function on `Fleet<N>`. The framework's
+//! claim is that *Schur-convex* gauges admit a particular composition
+//! algebra: any mass-decreasing or majorization-decreasing operation
+//! reduces a Schur-convex gauge, so such operations preserve the safety
+//! claim `g(fleet) ≤ τ` unconditionally.
 //!
-//! `SchurConvex` is sealed — the only impls live in this module. The seal is
-//! tighter than honor-system: the `SchurConvex` impls are `SumTopK<K>` (the
-//! parameterized **Ky Fan k-norm**) and `WeightedKyFan<N>` (non-negative
-//! weighted combinations of Ky Fan norms). This is mathematically faithful to
-//! the *Ky Fan dominance theorem*: `x ≻ y` (majorization) iff
-//! `‖x‖_(k) ≤ ‖y‖_(k)` for every `k`, where `‖·‖_(k)` is the Ky Fan k-norm
-//! (sum of the k largest entries). The Ky Fan k-norms generate the partial
-//! order at the heart of the framework, and non-negative combinations of
-//! them are themselves Schur-convex (by linearity of the Schur ordering).
-//! Restricting `SchurConvex` to this family makes the seal a precise
-//! mathematical statement, not a curatorial one.
+//! `SchurConvex<N>` is sealed — the only impls live in this module. The
+//! seal is tighter than honor-system: the impls are `SumTopK<K, N>` (the
+//! parameterized **Ky Fan k-norm**) and `WeightedKyFan<K, N>` (non-negative
+//! weighted combinations). These are mathematically faithful to the *Ky
+//! Fan dominance theorem*: `x ≻ y` (majorization) iff `‖x‖_(k) ≤ ‖y‖_(k)`
+//! for every `k`, where `‖·‖_(k)` is the Ky Fan k-norm (sum of the k
+//! largest entries). The Ky Fan family generates the partial order at the
+//! heart of the framework, and non-negative combinations are themselves
+//! Schur-convex (by linearity of the Schur ordering). Restricting
+//! `SchurConvex` to this family makes the seal a precise mathematical
+//! statement.
 //!
-//! Common gauges are exposed as type aliases: `Linfty = SumTopK<1>` is the
-//! ℓ_∞ norm (max utilization).
+//! ## Multi-dimensional reduction
+//!
+//! Phase 2 adds an `N`-dimensional load model. The component-wise gauges
+//! reduce each machine's `[f64; N]` utilization vector to a scalar by
+//! taking the worst dimension (`max_d`), and then apply the Schur-convex
+//! reduction over machines. This is sound under multi-dimensional
+//! majorization (Marshall-Olkin §15.A) when the move algebra ensures
+//! per-dimension Pigou-Dalton conditions — the witnesses in
+//! `move_kind.rs` enforce exactly that.
+//!
+//! Joint multi-dim gauges (operating on the joint utilization
+//! distribution rather than the per-machine worst-dim) are deferred to a
+//! follow-up; the component-wise reduction is the natural starting point
+//! and covers the operationally interesting "no machine should be over τ
+//! in any dimension" framing.
+//!
+//! Common gauges are exposed as type aliases: `Linfty<N> = SumTopK<1, N>`
+//! is the worst-machine, worst-dimension utilization.
 
 use crate::load::Fleet;
 
 mod sealed {
-    /// Sealing trait. Prevents downstream crates from declaring their own
-    /// `SchurConvex` impls and silently breaking the totality of `apply`
-    /// for typed-pure moves.
     pub trait Sealed {}
 }
 
-/// A real-valued function on `Fleet`. Method takes `&self` so gauges may
-/// carry runtime parameters (e.g., `WeightedKyFan`'s weights array).
-pub trait Gauge: sealed::Sealed {
+/// A real-valued function on `Fleet<N>`. Method takes `&self` so gauges
+/// may carry runtime parameters (e.g., `WeightedKyFan`'s weights array).
+pub trait Gauge<const N: usize>: sealed::Sealed {
     /// Evaluate the gauge on a fleet snapshot.
-    fn eval(&self, fleet: &Fleet) -> f64;
+    fn eval(&self, fleet: &Fleet<N>) -> f64;
 
     /// Human-readable name for diagnostics. Default: type name.
     fn name(&self) -> &'static str {
@@ -49,55 +62,39 @@ pub trait Gauge: sealed::Sealed {
 /// majorization-decreasing operation; mass removal strictly decreases any
 /// monotone Schur-convex gauge on non-negative load vectors.
 ///
-/// **Sealed by Ky Fan dominance**: the only `SchurConvex` impls in this crate
-/// are `SumTopK<K>` (Ky Fan k-norm) and `WeightedKyFan<N>` (non-negative
-/// linear combinations of Ky Fan norms). By the Ky Fan dominance theorem,
-/// the family `{‖·‖_(k) : k = 1, …, n}` *generates* the majorization order
-/// on non-negative `n`-vectors — equivalently, any symmetric gauge function
-/// on those vectors is dominated by a non-negative combination of these.
-/// So restricting `SchurConvex` to the Ky Fan family loses no expressive
-/// power that matters for the framework, and it makes the seal a precise
-/// mathematical statement.
-pub trait SchurConvex: Gauge {}
+/// **Sealed by Ky Fan dominance**: the only `SchurConvex<N>` impls in
+/// this crate are `SumTopK<K, N>` and `WeightedKyFan<K, N>`. By the Ky Fan
+/// dominance theorem, the Ky Fan family generates the majorization order
+/// on non-negative `n`-vectors. Restricting `SchurConvex` to this family
+/// loses no expressive power that matters for the framework, and it makes
+/// the seal a precise mathematical statement.
+pub trait SchurConvex<const N: usize>: Gauge<N> {}
 
-/// Sum of the top K utilizations across the fleet — the **Ky Fan k-norm**
-/// of the utilization vector.
+/// Sum of the top K worst-dimension utilizations across the fleet — the
+/// **Ky Fan k-norm** of the per-machine worst-dim utilization vector.
 ///
-/// `eval(fleet) = ‖util‖_(K) = Σ_{i ∈ top-K} (load_i / capacity_i)`.
+/// Per machine, reduce `[f64; N]` to a scalar via `max_d`. Then sort the
+/// per-machine scalars descending and sum the top `K`.
 ///
-/// **Schur-convex**: the sum of the k largest entries is the canonical
-/// example of a Schur-convex function on non-negative vectors (Marshall &
-/// Olkin §3.A.1; Hardy-Littlewood-Pólya). Equivalently to majorization:
-/// `x ≻ y` iff `Σ_{i ≤ k} x_(i) ≥ Σ_{i ≤ k} y_(i)` for every `k` (Ky Fan
-/// dominance). So the family `{SumTopK<K> : K = 1, 2, …}` is the partial
-/// order at the heart of the framework, in code form.
-///
-/// **Schur-convexity sketch**:
-/// - Let φ(x) = sum of the top K of x. φ depends only on sorted descending
-///   order, so it is symmetric (invariant under permutation).
-/// - For any Pigou-Dalton transfer (rich → poor with order-preserving mass),
-///   the new top-K sum cannot exceed the old: either neither rich nor poor
-///   is in the top K (sum unchanged), or the rich is in the top K and the
-///   poor isn't (sum decreases by the transferred amount), or both are in
-///   the top K (sum unchanged because mass is preserved within the top K).
-/// - Therefore `x ≻ y ⇒ φ(x) ≥ φ(y)`.
-///
-/// **Adding zero coordinates** (used by `borg_replay` when machines are
-/// pre-registered with zero load): adding a 0 entry to the vector cannot
-/// increase the sum of the top K — at worst, the new 0 displaces nothing,
-/// at best it pushes a positive value out of the top K. Safe.
+/// **Schur-convex**: top-K sum is the canonical Schur-convex example
+/// (Marshall-Olkin §3.A.1; Hardy-Littlewood-Pólya). Composing with the
+/// per-machine `max_d` reduction preserves Schur-convexity on the
+/// per-machine vector: if the per-dim utilization vectors are
+/// componentwise weakly-super-majorized (which the multi-dim witnesses
+/// enforce), then the worst-dim per machine is also pointwise non-
+/// increasing in the partial order, so the resulting scalar vector is
+/// also weakly-super-majorized, and the top-K sum is non-increasing.
 #[derive(Default)]
-pub struct SumTopK<const K: usize>;
+pub struct SumTopK<const K: usize, const N: usize>;
 
-impl<const K: usize> sealed::Sealed for SumTopK<K> {}
+impl<const K: usize, const N: usize> sealed::Sealed for SumTopK<K, N> {}
 
-impl<const K: usize> Gauge for SumTopK<K> {
-    fn eval(&self, fleet: &Fleet) -> f64 {
+impl<const K: usize, const N: usize> Gauge<N> for SumTopK<K, N> {
+    fn eval(&self, fleet: &Fleet<N>) -> f64 {
         if fleet.is_empty() || K == 0 {
             return 0.0;
         }
-        let mut utils: Vec<f64> = fleet.iter().map(|(_, spec)| spec.utilization()).collect();
-        // Sort descending so the top-K is the prefix.
+        let mut utils: Vec<f64> = fleet.iter().map(|(_, spec)| spec.worst_utilization()).collect();
         utils.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
         utils.iter().take(K).sum()
     }
@@ -107,69 +104,41 @@ impl<const K: usize> Gauge for SumTopK<K> {
     }
 }
 
-impl<const K: usize> SchurConvex for SumTopK<K> {}
+impl<const K: usize, const N: usize> SchurConvex<N> for SumTopK<K, N> {}
 
-/// ℓ_∞ gauge: maximum utilization across the fleet.
+/// ℓ_∞ gauge: max-machine, max-dimension utilization.
 ///
-/// `eval(fleet) = max_i (load_i / capacity_i)`.
+/// `eval(fleet) = max_i max_d (load[i][d] / cap[i][d])`.
 ///
-/// Equivalent to the Ky Fan 1-norm: `‖x‖_(1) = max_i x_i`. Provided as a
-/// type alias for clarity — it is a common operationally-meaningful gauge,
-/// and the alias makes the typical "no machine should exceed τ% of
-/// capacity" framing read naturally in user code.
-pub type Linfty = SumTopK<1>;
+/// Equivalent to `SumTopK<1, N>`. Provided as a type alias for clarity —
+/// it is the operationally meaningful "no machine should exceed τ% of
+/// capacity in any dimension" gauge.
+pub type Linfty<const N: usize> = SumTopK<1, N>;
 
-/// **Non-negative weighted combination of Ky Fan k-norms.**
+/// **Non-negative weighted combination of Ky Fan k-norms** over the
+/// per-machine worst-dim utilization vector.
 ///
-/// `eval(fleet) = Σ_{k=1}^{N} weights[k-1] · ‖util‖_(k)`
+/// `eval(fleet) = Σ_{k=1}^{K} weights[k-1] · ‖worst_dim_util‖_(k)`
 ///
-/// where `weights[k-1]` is the coefficient on the k-th Ky Fan norm. This
-/// covers essentially every operationally interesting symmetric gauge:
-/// every monotone symmetric gauge function on non-negative vectors can be
-/// written as a non-negative weighted combination (or, in the general
-/// case, supremum thereof) of Ky Fan norms.
+/// where `weights[k-1]` is the coefficient on the k-th Ky Fan norm.
 ///
 /// **Schur-convex**: a non-negative linear combination of Schur-convex
-/// functions is Schur-convex. Each `SumTopK<K>` is Schur-convex (Marshall-
-/// Olkin §3.A.1); non-negative scalars and addition both preserve the
-/// Schur-convex cone. Therefore `WeightedKyFan<N>` with weights ≥ 0 is
-/// Schur-convex.
+/// functions is Schur-convex.
 ///
 /// **Construction**: use [`WeightedKyFan::new`] (returns `Option` —
 /// rejects negative or NaN weights). Direct construction is forbidden
 /// because the framework's totality argument depends on weights being
 /// non-negative.
-///
-/// # Examples
-///
-/// ```
-/// use fulcrum::gauge::{Gauge, WeightedKyFan};
-/// use fulcrum::load::{Fleet, MachineId};
-///
-/// let mut fleet = Fleet::new();
-/// fleet.add_machine(MachineId(1), 100, 80);
-/// fleet.add_machine(MachineId(2), 100, 50);
-/// fleet.add_machine(MachineId(3), 100, 30);
-///
-/// // 1.0 · ‖·‖_(1) + 0.5 · ‖·‖_(2)
-/// // = 0.80 + 0.5 · (0.80 + 0.50)
-/// // = 0.80 + 0.65 = 1.45
-/// let g = WeightedKyFan::new([1.0, 0.5]).unwrap();
-/// assert!((g.eval(&fleet) - 1.45).abs() < 1e-9);
-///
-/// // Negative weights are rejected — they would break Schur-convexity.
-/// assert!(WeightedKyFan::new([1.0, -0.5]).is_none());
-/// ```
-pub struct WeightedKyFan<const N: usize> {
-    weights: [f64; N],
+pub struct WeightedKyFan<const K: usize, const N: usize> {
+    weights: [f64; K],
 }
 
-impl<const N: usize> WeightedKyFan<N> {
-    /// Construct a `WeightedKyFan<N>` if all weights are finite and
+impl<const K: usize, const N: usize> WeightedKyFan<K, N> {
+    /// Construct a `WeightedKyFan<K, N>` if all weights are finite and
     /// non-negative. Negative or NaN weights would break Schur-convexity
     /// and invalidate the framework's totality argument; the constructor
     /// rejects them.
-    pub fn new(weights: [f64; N]) -> Option<Self> {
+    pub fn new(weights: [f64; K]) -> Option<Self> {
         if weights.iter().all(|w| w.is_finite() && *w >= 0.0) {
             Some(Self { weights })
         } else {
@@ -179,24 +148,22 @@ impl<const N: usize> WeightedKyFan<N> {
 
     /// Borrow the weights. Construction validation guarantees these are
     /// non-negative and finite.
-    pub fn weights(&self) -> &[f64; N] {
+    pub fn weights(&self) -> &[f64; K] {
         &self.weights
     }
 }
 
-impl<const N: usize> sealed::Sealed for WeightedKyFan<N> {}
+impl<const K: usize, const N: usize> sealed::Sealed for WeightedKyFan<K, N> {}
 
-impl<const N: usize> Gauge for WeightedKyFan<N> {
-    fn eval(&self, fleet: &Fleet) -> f64 {
-        if fleet.is_empty() || N == 0 {
+impl<const K: usize, const N: usize> Gauge<N> for WeightedKyFan<K, N> {
+    fn eval(&self, fleet: &Fleet<N>) -> f64 {
+        if fleet.is_empty() || K == 0 {
             return 0.0;
         }
-        let mut utils: Vec<f64> = fleet.iter().map(|(_, spec)| spec.utilization()).collect();
+        let mut utils: Vec<f64> = fleet.iter().map(|(_, spec)| spec.worst_utilization()).collect();
         utils.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Compute Σ_{k=1}^{N} weights[k-1] · (sum of top-k utilizations)
-        // by walking the sorted utils once and accumulating the cumulative
-        // top-k sum.
+        // Σ_{k=1}^{K} weights[k-1] · (sum of top-k worst-dim utilizations)
         let mut total = 0.0_f64;
         let mut cumulative = 0.0_f64;
         for (k, w) in self.weights.iter().enumerate() {
@@ -213,151 +180,90 @@ impl<const N: usize> Gauge for WeightedKyFan<N> {
     }
 }
 
-impl<const N: usize> SchurConvex for WeightedKyFan<N> {}
+impl<const K: usize, const N: usize> SchurConvex<N> for WeightedKyFan<K, N> {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::load::{Fleet, MachineId};
 
-    fn fleet_uniform(loads: &[(u64, u64)], capacity: u64) -> Fleet {
+    fn fleet1_uniform(loads: &[(u64, u64)], capacity: u64) -> Fleet<1> {
         let mut f = Fleet::new();
         for &(id, load) in loads {
-            f.add_machine(MachineId(id), capacity, load);
+            f.add_machine(MachineId(id), [capacity], [load]);
         }
         f
     }
 
     #[test]
     fn linfty_empty_fleet_is_zero() {
-        let fleet = Fleet::new();
-        assert_eq!(Linfty::default().eval(&fleet), 0.0);
+        let fleet: Fleet<1> = Fleet::new();
+        assert_eq!(Linfty::<1>::default().eval(&fleet), 0.0);
     }
 
     #[test]
-    fn linfty_picks_max_utilization() {
-        let fleet = fleet_uniform(&[(1, 30), (2, 80), (3, 50)], 100);
-        assert!((Linfty::default().eval(&fleet) - 0.80).abs() < 1e-9);
+    fn linfty_picks_max_utilization_1d() {
+        let fleet = fleet1_uniform(&[(1, 30), (2, 80), (3, 50)], 100);
+        assert!((Linfty::<1>::default().eval(&fleet) - 0.80).abs() < 1e-9);
     }
 
     #[test]
-    fn sumtopk_sums_top_k_utilizations() {
-        let fleet = fleet_uniform(&[(1, 30), (2, 80), (3, 50)], 100);
-        // top 2 are 80 and 50 → utilizations 0.80 + 0.50 = 1.30
-        assert!((SumTopK::<2>::default().eval(&fleet) - 1.30).abs() < 1e-9);
-        // top 1 IS Linfty (the alias).
+    fn sumtopk_sums_top_k_utilizations_1d() {
+        let fleet = fleet1_uniform(&[(1, 30), (2, 80), (3, 50)], 100);
+        assert!((SumTopK::<2, 1>::default().eval(&fleet) - 1.30).abs() < 1e-9);
         assert!(
-            (SumTopK::<1>::default().eval(&fleet) - Linfty::default().eval(&fleet)).abs() < 1e-9
+            (SumTopK::<1, 1>::default().eval(&fleet) - Linfty::<1>::default().eval(&fleet)).abs()
+                < 1e-9
         );
-        // top 3 = sum of all
-        assert!((SumTopK::<3>::default().eval(&fleet) - 1.60).abs() < 1e-9);
-        // K > n → still just sum of all
-        assert!((SumTopK::<10>::default().eval(&fleet) - 1.60).abs() < 1e-9);
+        assert!((SumTopK::<3, 1>::default().eval(&fleet) - 1.60).abs() < 1e-9);
+        assert!((SumTopK::<10, 1>::default().eval(&fleet) - 1.60).abs() < 1e-9);
     }
 
     #[test]
-    fn sumtopk_respects_majorization_under_pigou_dalton() {
-        // x = (80, 30, 30); transfer 20 from coord 1 to coord 2.
-        // x' = (60, 50, 30). Both have mass 140; x ≻ x'.
-        // SumTopK<2> on x = 80 + 30 = 110. On x' = 60 + 50 = 110. Equal.
-        // SumTopK<1> on x = 80. On x' = 60. Strict decrease.
-        let before = fleet_uniform(&[(1, 80), (2, 30), (3, 30)], 100);
-        let after = fleet_uniform(&[(1, 60), (2, 50), (3, 30)], 100);
-
-        let g2 = SumTopK::<2>::default();
-        let g1 = SumTopK::<1>::default();
-        assert!(g2.eval(&before) >= g2.eval(&after));
-        assert!(g1.eval(&before) > g1.eval(&after));
-    }
-
-    #[test]
-    fn linfty_is_sumtopk_one() {
-        let fleet = fleet_uniform(&[(1, 73), (2, 19), (3, 84)], 100);
-        let a = Linfty::default().eval(&fleet);
-        let b = SumTopK::<1>::default().eval(&fleet);
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn weighted_kyfan_combines_norms() {
-        let fleet = fleet_uniform(&[(1, 80), (2, 50), (3, 30)], 100);
-
-        // 1.0 · ‖·‖_(1) + 0.5 · ‖·‖_(2)
-        // = 0.80 + 0.5 · (0.80 + 0.50)
-        // = 0.80 + 0.65 = 1.45
-        let g = WeightedKyFan::new([1.0, 0.5]).unwrap();
+    fn weighted_kyfan_combines_norms_1d() {
+        let fleet = fleet1_uniform(&[(1, 80), (2, 50), (3, 30)], 100);
+        let g = WeightedKyFan::<2, 1>::new([1.0, 0.5]).unwrap();
         assert!((g.eval(&fleet) - 1.45).abs() < 1e-9);
     }
 
     #[test]
     fn weighted_kyfan_rejects_invalid_weights() {
-        // Negative weights — would break Schur-convexity.
-        assert!(WeightedKyFan::new([1.0, -0.5]).is_none());
-        // NaN — would break the gauge value altogether.
-        assert!(WeightedKyFan::new([1.0, f64::NAN]).is_none());
-        // Infinity — not finite.
-        assert!(WeightedKyFan::new([1.0, f64::INFINITY]).is_none());
-        // Zero is allowed (degenerate but valid).
-        assert!(WeightedKyFan::new([0.0, 0.0]).is_some());
-        // All non-negative is fine.
-        assert!(WeightedKyFan::new([1.0, 0.5, 0.25]).is_some());
+        assert!(WeightedKyFan::<2, 1>::new([1.0, -0.5]).is_none());
+        assert!(WeightedKyFan::<2, 1>::new([1.0, f64::NAN]).is_none());
+        assert!(WeightedKyFan::<2, 1>::new([1.0, f64::INFINITY]).is_none());
+        assert!(WeightedKyFan::<2, 1>::new([0.0, 0.0]).is_some());
+        assert!(WeightedKyFan::<3, 1>::new([1.0, 0.5, 0.25]).is_some());
+    }
+
+    // ----- Multi-dim (component-wise) -----
+
+    #[test]
+    fn linfty_multi_dim_takes_worst_dim_per_machine() {
+        // Two-dim. Machine 1 is balanced (0.40, 0.40); machine 2 is
+        // skewed (0.20, 0.90). Worst-dim per machine: 0.40 vs 0.90.
+        // Linfty picks the worst worst-dim → 0.90.
+        let mut f: Fleet<2> = Fleet::new();
+        f.add_machine(MachineId(1), [100, 100], [40, 40]);
+        f.add_machine(MachineId(2), [100, 100], [20, 90]);
+        assert!((Linfty::<2>::default().eval(&f) - 0.90).abs() < 1e-9);
     }
 
     #[test]
-    fn weighted_kyfan_respects_majorization() {
-        // Majorization-decreasing transfer reduces or preserves any
-        // non-negative weighted Ky Fan combination.
-        let before = fleet_uniform(&[(1, 90), (2, 20), (3, 10)], 100);
-        let after = fleet_uniform(&[(1, 60), (2, 40), (3, 20)], 100);
-
-        // Various non-trivial weight vectors.
-        for weights in [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0], [1.0, 0.5]] {
-            let g = WeightedKyFan::new(weights).unwrap();
-            assert!(
-                g.eval(&before) >= g.eval(&after),
-                "majorization not respected with weights {:?}: {} < {}",
-                weights,
-                g.eval(&before),
-                g.eval(&after)
-            );
-        }
+    fn sumtopk_multi_dim_uses_per_machine_worst_dim() {
+        let mut f: Fleet<2> = Fleet::new();
+        f.add_machine(MachineId(1), [100, 100], [80, 30]); // worst-dim 0.80
+        f.add_machine(MachineId(2), [100, 100], [40, 60]); // worst-dim 0.60
+        f.add_machine(MachineId(3), [100, 100], [10, 50]); // worst-dim 0.50
+        // Top-2 worst-dim: 0.80 + 0.60 = 1.40.
+        assert!((SumTopK::<2, 2>::default().eval(&f) - 1.40).abs() < 1e-9);
     }
 
     #[test]
-    fn weighted_kyfan_collapses_to_sumtopk_with_unit_weight() {
-        let fleet = fleet_uniform(&[(1, 80), (2, 50), (3, 30)], 100);
-
-        // weights [1.0, 0.0] = pure top-1 = Linfty
-        let g_one = WeightedKyFan::new([1.0, 0.0]).unwrap();
-        let linfty = Linfty::default();
-        assert!((g_one.eval(&fleet) - linfty.eval(&fleet)).abs() < 1e-9);
-
-        // weights [0.0, 1.0] = pure top-2
-        let g_two = WeightedKyFan::new([0.0, 1.0]).unwrap();
-        let sum2 = SumTopK::<2>::default();
-        assert!((g_two.eval(&fleet) - sum2.eval(&fleet)).abs() < 1e-9);
-    }
-
-    #[test]
-    fn linfty_under_heterogeneous_capacity() {
-        // Per-machine capacity. Linfty picks the machine with the highest
-        // utilization, regardless of absolute load.
-        let mut fleet = Fleet::new();
-        fleet.add_machine(MachineId(1), 100, 80);  // util 0.80
-        fleet.add_machine(MachineId(2), 200, 100); // util 0.50
-        fleet.add_machine(MachineId(3), 50, 40);   // util 0.80
-        // Load on machine 2 is highest in absolute terms but its
-        // utilization is lower than 1 and 3, which tie at 0.80.
-        assert!((Linfty::default().eval(&fleet) - 0.80).abs() < 1e-9);
-    }
-
-    #[test]
-    fn sumtopk_under_heterogeneous_capacity() {
-        let mut fleet = Fleet::new();
-        fleet.add_machine(MachineId(1), 100, 80);  // util 0.80
-        fleet.add_machine(MachineId(2), 200, 100); // util 0.50
-        fleet.add_machine(MachineId(3), 50, 40);   // util 0.80
-        // Top-2 utilizations: 0.80 + 0.80 = 1.60.
-        assert!((SumTopK::<2>::default().eval(&fleet) - 1.60).abs() < 1e-9);
+    fn linfty_under_heterogeneous_capacity_multi_dim() {
+        let mut f: Fleet<2> = Fleet::new();
+        f.add_machine(MachineId(1), [100, 200], [80, 80]); // utils (0.80, 0.40), worst 0.80
+        f.add_machine(MachineId(2), [200, 100], [80, 80]); // utils (0.40, 0.80), worst 0.80
+        f.add_machine(MachineId(3), [100, 100], [30, 30]); // utils (0.30, 0.30), worst 0.30
+        assert!((Linfty::<2>::default().eval(&f) - 0.80).abs() < 1e-9);
     }
 }

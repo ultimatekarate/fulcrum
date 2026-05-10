@@ -1,11 +1,16 @@
-//! Replay support: classify and apply a stream of fleet events through the
-//! typed framework.
+//! Replay support: classify and apply a stream of fleet events through
+//! the typed framework.
 //!
 //! This module exists to make `examples/borg_replay.rs` testable. It is
 //! *not* part of the framework's algebraic core — it's a thin layer that
 //! consumes a stream of `ParsedEvent`s and routes each one into the move
-//! alphabet. The framework itself doesn't know about Borg traces, CSV, or
-//! event timestamps; that concern lives here.
+//! alphabet.
+//!
+//! The replay pipeline is pinned to `N = 1` because the Google 2019 Borg
+//! trace subset only carries CPU demand. A multi-dim replay would
+//! require trace data with both CPU and memory per event; that's a
+//! Phase 4 (reconciler / event-stream generalization) concern, not a
+//! Phase 2 one.
 //!
 //! Pre-1.0; subject to change. Not stable API.
 
@@ -37,8 +42,9 @@ pub struct ParsedEvent {
     pub instance: String,
     /// Destination machine for `Schedule`; ignored for `Remove`.
     pub machine: MachineId,
-    /// Resource demand for `Schedule`; ignored for `Remove`.
-    pub mass: Mass,
+    /// Resource demand for `Schedule`; ignored for `Remove`. 1D — see
+    /// the module docs for why.
+    pub mass: Mass<1>,
 }
 
 /// Classification counters. Each event the classifier processes is counted
@@ -90,9 +96,9 @@ impl Counters {
 }
 
 /// Result of running the classifier.
-pub struct ReplayResult<G: SchurConvex> {
-    pub safe: Safe<G>,
-    pub history: MoveHistory,
+pub struct ReplayResult<G: SchurConvex<1>> {
+    pub safe: Safe<G, 1>,
+    pub history: MoveHistory<1>,
     pub counters: Counters,
 }
 
@@ -100,7 +106,7 @@ pub struct ReplayResult<G: SchurConvex> {
 #[derive(Clone, Copy, Debug)]
 struct InstanceState {
     machine: MachineId,
-    mass: Mass,
+    mass: Mass<1>,
 }
 
 /// Classify a stream of events and apply them through the typed framework.
@@ -113,7 +119,7 @@ struct InstanceState {
 /// Threshold is `f64::INFINITY` — the replay is for *classification*, not
 /// for enforcement; we don't want trace events that happen to have exceeded
 /// capacity in the original Borg run to abort the replay.
-pub fn classify_and_apply<G: SchurConvex + Default>(
+pub fn classify_and_apply<G: SchurConvex<1> + Default>(
     mut events: Vec<ParsedEvent>,
     capacity: u64,
 ) -> Result<ReplayResult<G>, GaugeError> {
@@ -125,20 +131,18 @@ pub fn classify_and_apply<G: SchurConvex + Default>(
 
     // Pre-populate the fleet with every machine mentioned by a Schedule.
     // The Borg trace doesn't include per-machine capacity; the `capacity`
-    // argument is a uniform value applied to every machine. Phase 1's
-    // heterogeneous-capacity Fleet supports this trivially as a degenerate
-    // case (all specs share the same capacity).
-    let mut fleet = Fleet::new();
+    // argument is a uniform value applied to every machine.
+    let mut fleet: Fleet<1> = Fleet::new();
     let mut seen_machines: std::collections::HashSet<u64> =
         std::collections::HashSet::new();
     for ev in &events {
         if ev.kind == EventKind::Schedule && seen_machines.insert(ev.machine.0) {
-            fleet.add_machine(ev.machine, capacity, 0);
+            fleet.add_machine(ev.machine, [capacity], [0]);
         }
     }
 
-    let mut safe: Safe<G> = Safe::new(fleet, f64::INFINITY)?;
-    let mut history = MoveHistory::new();
+    let mut safe: Safe<G, 1> = Safe::new(fleet, f64::INFINITY)?;
+    let mut history: MoveHistory<1> = MoveHistory::new();
     let mut instances: HashMap<String, InstanceState> = HashMap::new();
     let mut counters = Counters::default();
 
@@ -157,8 +161,8 @@ pub fn classify_and_apply<G: SchurConvex + Default>(
                     // Migration. Try HotToCold, then Neutral, fall through
                     // to ColdToHot. Always migrate `prior.mass` to keep
                     // bookkeeping consistent with the fleet state we own.
-                    let src_load = safe.fleet().load(prior.machine).unwrap_or(0);
-                    let dst_load = safe.fleet().load(machine).unwrap_or(0);
+                    let src_load = safe.fleet().load(prior.machine).map(|l| l[0]).unwrap_or(0);
+                    let dst_load = safe.fleet().load(machine).map(|l| l[0]).unwrap_or(0);
 
                     if src_load > dst_load {
                         if let Some(m) = HotToCold::witness(
@@ -282,16 +286,16 @@ pub fn classify_and_apply<G: SchurConvex + Default>(
 /// can be surfaced rather than panic in `expect`. In practice, this only
 /// fires if the trace data is internally inconsistent; for the Borg
 /// subset, it should never fire.
-fn apply_remove_or_skip<G: SchurConvex>(
-    r: Remove,
-    safe: Safe<G>,
+fn apply_remove_or_skip<G: SchurConvex<1>>(
+    r: Remove<1>,
+    safe: Safe<G, 1>,
     counters: &mut Counters,
-) -> Safe<G> {
+) -> Safe<G, 1> {
     // Pre-check the remove against the fleet to avoid panicking inside
     // Remove::apply, which is total at the type level but has internal
     // expects on well-formedness.
-    let load = safe.fleet().load(r.machine).unwrap_or(0);
-    if load < r.mass.0 {
+    let load = safe.fleet().load(r.machine).map(|l| l[0]).unwrap_or(0);
+    if load < r.mass.0[0] {
         counters.well_formedness_skipped += 1;
         // Drop the remove. The instance is removed from `instances` already;
         // the fleet stays as-is.
@@ -301,11 +305,11 @@ fn apply_remove_or_skip<G: SchurConvex>(
 }
 
 /// Convenience: compute mass from a normalized cpus value (in [0, 1+]).
-pub fn cpus_to_mass(cpus: f64, scale: u64) -> Mass {
+pub fn cpus_to_mass(cpus: f64, scale: u64) -> Mass<1> {
     if cpus.is_nan() || cpus < 0.0 {
-        Mass(0)
+        Mass([0])
     } else {
-        Mass((cpus * scale as f64).round() as u64)
+        Mass([(cpus * scale as f64).round() as u64])
     }
 }
 
@@ -390,13 +394,13 @@ pub fn parse_csv(path: &std::path::Path) -> Result<(Vec<ParsedEvent>, u64), Box<
                 let cpus = parse_cpus_from_resource_request(rec.get(c_request).unwrap_or(""))
                     .unwrap_or(0.0);
                 let m = cpus_to_mass(cpus, scale);
-                if m.0 == 0 {
+                if m.0[0] == 0 {
                     dropped += 1;
                     continue;
                 }
                 m
             }
-            EventKind::Remove => Mass(0), // unused for remove
+            EventKind::Remove => Mass([0]), // unused for remove
         };
 
         events.push(ParsedEvent { time, kind, instance: inst, machine, mass });
@@ -416,7 +420,7 @@ mod tests {
             kind: EventKind::Schedule,
             instance: inst.to_string(),
             machine: MachineId(machine),
-            mass: Mass(mass),
+            mass: Mass([mass]),
         }
     }
 
@@ -426,13 +430,13 @@ mod tests {
             kind: EventKind::Remove,
             instance: inst.to_string(),
             machine: MachineId(0),
-            mass: Mass(0),
+            mass: Mass([0]),
         }
     }
 
     #[test]
     fn empty_stream() {
-        let r: ReplayResult<Linfty> = classify_and_apply(vec![], 100).unwrap();
+        let r: ReplayResult<Linfty<1>> = classify_and_apply(vec![], 100).unwrap();
         assert_eq!(r.counters, Counters::default());
     }
 
@@ -442,7 +446,7 @@ mod tests {
             ev_schedule(1, "a", 1, 30),
             ev_remove(2, "a"),
         ];
-        let r: ReplayResult<Linfty> = classify_and_apply(events, 100).unwrap();
+        let r: ReplayResult<Linfty<1>> = classify_and_apply(events, 100).unwrap();
         assert_eq!(r.counters.place, 1);
         assert_eq!(r.counters.remove, 1);
         assert_eq!(r.counters.applied_total(), 2);
@@ -452,7 +456,7 @@ mod tests {
     #[test]
     fn remove_for_unseen_instance_is_unobservable() {
         let events = vec![ev_remove(1, "ghost")];
-        let r: ReplayResult<Linfty> = classify_and_apply(events, 100).unwrap();
+        let r: ReplayResult<Linfty<1>> = classify_and_apply(events, 100).unwrap();
         assert_eq!(r.counters.remove_unobservable, 1);
         assert_eq!(r.counters.applied_total(), 0);
     }
@@ -471,7 +475,7 @@ mod tests {
             ev_schedule(2, "small", 1, 20),
             ev_schedule(3, "small", 2, 20),
         ];
-        let r: ReplayResult<Linfty> = classify_and_apply(events, 100).unwrap();
+        let r: ReplayResult<Linfty<1>> = classify_and_apply(events, 100).unwrap();
         assert_eq!(r.counters.place, 2);
         assert_eq!(r.counters.hot_to_cold, 1);
         assert_eq!(r.counters.cold_to_hot, 0);
@@ -486,7 +490,7 @@ mod tests {
             ev_schedule(2, "heavy", 2, 50),
             ev_schedule(3, "light", 2, 10),
         ];
-        let r: ReplayResult<Linfty> = classify_and_apply(events, 100).unwrap();
+        let r: ReplayResult<Linfty<1>> = classify_and_apply(events, 100).unwrap();
         assert_eq!(r.counters.place, 2);
         assert_eq!(r.counters.cold_to_hot, 1);
         assert_eq!(r.counters.hot_to_cold, 0);
@@ -508,7 +512,7 @@ mod tests {
             ev_schedule(3, "a", 3, 10),  // HotToCold (m1=10 > m3=0)
             ev_schedule(4, "b", 3, 10),  // m2=10 == m3=10, Neutral
         ];
-        let r: ReplayResult<Linfty> = classify_and_apply(events, 100).unwrap();
+        let r: ReplayResult<Linfty<1>> = classify_and_apply(events, 100).unwrap();
         assert_eq!(r.counters.place, 2);
         assert_eq!(r.counters.hot_to_cold, 1);
         assert_eq!(r.counters.neutral, 1);
@@ -522,7 +526,7 @@ mod tests {
             ev_remove(2, "a"),
             ev_schedule(1, "a", 1, 30),
         ];
-        let r: ReplayResult<Linfty> = classify_and_apply(events, 100).unwrap();
+        let r: ReplayResult<Linfty<1>> = classify_and_apply(events, 100).unwrap();
         assert_eq!(r.counters.place, 1);
         assert_eq!(r.counters.remove, 1);
         assert_eq!(r.counters.remove_unobservable, 0);
@@ -534,7 +538,7 @@ mod tests {
             ev_schedule(1, "a", 1, 30),
             ev_schedule(2, "a", 1, 30),  // reschedule on same machine
         ];
-        let r: ReplayResult<Linfty> = classify_and_apply(events, 100).unwrap();
+        let r: ReplayResult<Linfty<1>> = classify_and_apply(events, 100).unwrap();
         assert_eq!(r.counters.place, 1);
         assert_eq!(r.counters.hot_to_cold, 0);
         assert_eq!(r.counters.neutral, 0);

@@ -11,29 +11,22 @@
 
 use fulcrum::{ColdToHot, Fleet, HotToCold, Linfty, MachineId, Mass, Place, Safe};
 
-fn fleet(loads: &[(u64, u64)], capacity: u64) -> Fleet {
+fn fleet(loads: &[(u64, u64)], capacity: u64) -> Fleet<1> {
     let mut f = Fleet::new();
     for &(id, load) in loads {
-        f.add_machine(MachineId(id), capacity, load);
+        f.add_machine(MachineId(id), [capacity], [load]);
     }
     f
 }
 
 #[test]
 fn place_creating_hotspot_is_rejected_at_apply() {
-    // Naive coordinate-cap check: machine 1 has capacity 100, current load
-    // 80, requested 10 → fits, accept. Naive accepts.
-    //
-    // Typed framework with Linfty and τ = 0.85: post-place utilization on
-    // machine 1 would be 0.90 > 0.85. Framework rejects at Place::apply.
     let f = fleet(&[(1, 80), (2, 30), (3, 30)], 100);
-    let safe: Safe<Linfty> = Safe::new(f, 0.85).unwrap();
+    let safe: Safe<Linfty<1>, 1> = Safe::new(f, 0.85).unwrap();
 
-    let p = Place::new(MachineId(1), Mass(10));
+    let p = Place::new(MachineId(1), Mass([10]));
     let result = p.apply_with_recheck(safe);
 
-    // Localization: the rejection lives at Place::apply. Grep for that
-    // function to find the bug surface.
     assert!(
         matches!(
             result,
@@ -45,11 +38,10 @@ fn place_creating_hotspot_is_rejected_at_apply() {
 
 #[test]
 fn cold_to_hot_creating_hotspot_is_rejected_at_apply() {
-    // Same scenario shape, now via a migration in the wrong direction.
     let f = fleet(&[(1, 80), (2, 30), (3, 30)], 100);
-    let safe: Safe<Linfty> = Safe::new(f, 0.85).unwrap();
+    let safe: Safe<Linfty<1>, 1> = Safe::new(f, 0.85).unwrap();
 
-    let m = ColdToHot::new(MachineId(2), MachineId(1), Mass(10));
+    let m = ColdToHot::new(MachineId(2), MachineId(1), Mass([10]));
     let result = m.apply_with_recheck(safe);
 
     assert!(
@@ -63,14 +55,8 @@ fn cold_to_hot_creating_hotspot_is_rejected_at_apply() {
 
 #[test]
 fn forged_hot_to_cold_against_wrong_fleet_is_caught_by_witness() {
-    // Anti-pattern: try to construct a HotToCold against a fleet where the
-    // direction is wrong. Witness must refuse.
-    //
-    // Localization: the rejection lives at HotToCold::witness. Grep for that
-    // function. The framework prevents the user from ever holding a forged
-    // HotToCold token.
     let f = fleet(&[(1, 30), (2, 80)], 100);
-    let attempted = HotToCold::witness(MachineId(1), MachineId(2), Mass(10), &f);
+    let attempted = HotToCold::witness(MachineId(1), MachineId(2), Mass([10]), &f);
     assert!(
         attempted.is_none(),
         "witness must reject Pigou-Dalton in the wrong direction"
@@ -79,23 +65,19 @@ fn forged_hot_to_cold_against_wrong_fleet_is_caught_by_witness() {
 
 #[test]
 fn rebalance_chain_keeps_fleet_safe_through_intermediate_states() {
-    // The framework's distinctive claim: a sequence of typed-pure moves
-    // preserves the safety claim *at every intermediate state*, not just at
-    // the endpoints. Walk a chain step by step, asserting the gauge never
-    // exceeds threshold.
     let f = fleet(&[(1, 84), (2, 20), (3, 20), (4, 20)], 100);
-    let safe: Safe<Linfty> = Safe::new(f, 0.85).unwrap();
+    let safe: Safe<Linfty<1>, 1> = Safe::new(f, 0.85).unwrap();
     assert!(safe.gauge() <= 0.85);
 
-    let m1 = HotToCold::witness(MachineId(1), MachineId(2), Mass(20), safe.fleet()).unwrap();
+    let m1 = HotToCold::witness(MachineId(1), MachineId(2), Mass([20]), safe.fleet()).unwrap();
     let safe = m1.apply(safe);
     assert!(safe.gauge() <= 0.85);
 
-    let m2 = HotToCold::witness(MachineId(1), MachineId(3), Mass(20), safe.fleet()).unwrap();
+    let m2 = HotToCold::witness(MachineId(1), MachineId(3), Mass([20]), safe.fleet()).unwrap();
     let safe = m2.apply(safe);
     assert!(safe.gauge() <= 0.85);
 
-    let m3 = HotToCold::witness(MachineId(2), MachineId(4), Mass(10), safe.fleet()).unwrap();
+    let m3 = HotToCold::witness(MachineId(2), MachineId(4), Mass([10]), safe.fleet()).unwrap();
     let safe = m3.apply(safe);
     assert!(safe.gauge() <= 0.85);
 }

@@ -33,22 +33,27 @@ fn theorem_citation_present_and_substantive() {
         }
     }
 
-    assert_well_formed::<Remove>();
-    assert_well_formed::<HotToCold>();
-    assert_well_formed::<Neutral>();
-    assert_well_formed::<ColdToHot>();
-    assert_well_formed::<Place>();
+    assert_well_formed::<Remove<1>>();
+    assert_well_formed::<HotToCold<1>>();
+    assert_well_formed::<Neutral<1>>();
+    assert_well_formed::<ColdToHot<1>>();
+    assert_well_formed::<Place<1>>();
+    // Spot-check at a higher dim — the impls are blanket over N so the
+    // citations are the same, but verifying reminds reviewers that the
+    // theorem must apply across all dimensions.
+    assert_well_formed::<Remove<3>>();
+    assert_well_formed::<HotToCold<3>>();
 }
 
 /// Each primitive's NAME must be unique and non-empty.
 #[test]
 fn names_are_unique() {
     let names = [
-        Remove::NAME,
-        HotToCold::NAME,
-        Neutral::NAME,
-        ColdToHot::NAME,
-        Place::NAME,
+        Remove::<1>::NAME,
+        HotToCold::<1>::NAME,
+        Neutral::<1>::NAME,
+        ColdToHot::<1>::NAME,
+        Place::<1>::NAME,
     ];
     for n in &names {
         assert!(!n.is_empty());
@@ -59,26 +64,20 @@ fn names_are_unique() {
     assert_eq!(sorted.len(), names.len(), "duplicate NAME found");
 }
 
-/// The `EFFECT` classification matches the actual `apply` signature.
-/// Typed-pure effects (MassDecreasing, PigouDalton, Permutation) have
-/// total apply; catch-all effects (MassIncreasing, MassPreservingFree)
-/// have fallible apply. This is a *signature* check — see below.
 #[test]
 fn effect_classifications_are_correct() {
-    assert_eq!(Remove::EFFECT, Effect::MassDecreasing);
-    assert_eq!(HotToCold::EFFECT, Effect::PigouDalton);
-    assert_eq!(Neutral::EFFECT, Effect::Permutation);
-    assert_eq!(ColdToHot::EFFECT, Effect::MassPreservingFree);
-    assert_eq!(Place::EFFECT, Effect::MassIncreasing);
+    assert_eq!(Remove::<1>::EFFECT, Effect::MassDecreasing);
+    assert_eq!(HotToCold::<1>::EFFECT, Effect::PigouDalton);
+    assert_eq!(Neutral::<1>::EFFECT, Effect::Permutation);
+    assert_eq!(ColdToHot::<1>::EFFECT, Effect::MassPreservingFree);
+    assert_eq!(Place::<1>::EFFECT, Effect::MassIncreasing);
 
-    // Typed-pure effects.
-    assert!(Remove::EFFECT.is_typed_pure());
-    assert!(HotToCold::EFFECT.is_typed_pure());
-    assert!(Neutral::EFFECT.is_typed_pure());
+    assert!(Remove::<1>::EFFECT.is_typed_pure());
+    assert!(HotToCold::<1>::EFFECT.is_typed_pure());
+    assert!(Neutral::<1>::EFFECT.is_typed_pure());
 
-    // Catch-all effects.
-    assert!(!ColdToHot::EFFECT.is_typed_pure());
-    assert!(!Place::EFFECT.is_typed_pure());
+    assert!(!ColdToHot::<1>::EFFECT.is_typed_pure());
+    assert!(!Place::<1>::EFFECT.is_typed_pure());
 }
 
 /// Verify that the `apply` signatures match the `EFFECT` classification.
@@ -97,99 +96,94 @@ mod signature_match {
     use fulcrum::safe::{GaugeError, Safe};
     use fulcrum::{ColdToHot, HotToCold, Neutral, Place, Remove};
 
-    /// Compiles only if `M::apply` returns `Safe<G>` (total).
-    fn assert_total<M, G>(m: M, s: Safe<G>) -> Safe<G>
+    /// Compiles only if `M::apply` returns `Safe<G, N>` (total).
+    fn assert_total<M, G, const N: usize>(m: M, s: Safe<G, N>) -> Safe<G, N>
     where
-        M: TotalApply<G>,
-        G: SchurConvex,
+        M: TotalApply<G, N>,
+        G: SchurConvex<N>,
     {
         m.apply_total(s)
     }
 
-    /// Compiles only if `M::apply` returns `Result<Safe<G>, _>` (fallible).
-    fn assert_fallible<M, G>(m: M, s: Safe<G>) -> Result<Safe<G>, GaugeError>
+    /// Compiles only if `M::apply` returns `Result<Safe<G, N>, _>` (fallible).
+    fn assert_fallible<M, G, const N: usize>(
+        m: M,
+        s: Safe<G, N>,
+    ) -> Result<Safe<G, N>, GaugeError>
     where
-        M: FallibleApply<G>,
-        G: SchurConvex,
+        M: FallibleApply<G, N>,
+        G: SchurConvex<N>,
     {
         m.apply_fallible(s)
     }
 
-    trait TotalApply<G: SchurConvex> {
-        fn apply_total(self, safe: Safe<G>) -> Safe<G>;
+    trait TotalApply<G: SchurConvex<N>, const N: usize> {
+        fn apply_total(self, safe: Safe<G, N>) -> Safe<G, N>;
     }
 
-    trait FallibleApply<G: SchurConvex> {
-        fn apply_fallible(self, safe: Safe<G>) -> Result<Safe<G>, GaugeError>;
+    trait FallibleApply<G: SchurConvex<N>, const N: usize> {
+        fn apply_fallible(self, safe: Safe<G, N>) -> Result<Safe<G, N>, GaugeError>;
     }
 
-    impl<G: SchurConvex> TotalApply<G> for Remove {
-        fn apply_total(self, safe: Safe<G>) -> Safe<G> {
+    impl<G: SchurConvex<N>, const N: usize> TotalApply<G, N> for Remove<N> {
+        fn apply_total(self, safe: Safe<G, N>) -> Safe<G, N> {
             self.apply(safe)
         }
     }
-    impl<G: SchurConvex> TotalApply<G> for HotToCold {
-        fn apply_total(self, safe: Safe<G>) -> Safe<G> {
+    impl<G: SchurConvex<N>, const N: usize> TotalApply<G, N> for HotToCold<N> {
+        fn apply_total(self, safe: Safe<G, N>) -> Safe<G, N> {
             self.apply(safe)
         }
     }
-    impl<G: SchurConvex> TotalApply<G> for Neutral {
-        fn apply_total(self, safe: Safe<G>) -> Safe<G> {
+    impl<G: SchurConvex<N>, const N: usize> TotalApply<G, N> for Neutral<N> {
+        fn apply_total(self, safe: Safe<G, N>) -> Safe<G, N> {
             self.apply(safe)
         }
     }
-    impl<G: SchurConvex> FallibleApply<G> for ColdToHot {
-        fn apply_fallible(self, safe: Safe<G>) -> Result<Safe<G>, GaugeError> {
+    impl<G: SchurConvex<N>, const N: usize> FallibleApply<G, N> for ColdToHot<N> {
+        fn apply_fallible(self, safe: Safe<G, N>) -> Result<Safe<G, N>, GaugeError> {
             self.apply_with_recheck(safe)
         }
     }
-    impl<G: SchurConvex> FallibleApply<G> for Place {
-        fn apply_fallible(self, safe: Safe<G>) -> Result<Safe<G>, GaugeError> {
+    impl<G: SchurConvex<N>, const N: usize> FallibleApply<G, N> for Place<N> {
+        fn apply_fallible(self, safe: Safe<G, N>) -> Result<Safe<G, N>, GaugeError> {
             self.apply_with_recheck(safe)
         }
     }
 
-    // The classification should agree with the actual signature. If a
-    // primitive's EFFECT is typed-pure but its apply returns Result, the
-    // TotalApply impl above would fail to compile. Same in the other
-    // direction.
-    //
-    // Additionally, this test checks the const at runtime as a redundant
-    // safeguard.
     #[test]
     fn typed_pure_primitives_have_typed_pure_effect() {
-        assert!(Remove::EFFECT.is_typed_pure());
-        assert!(HotToCold::EFFECT.is_typed_pure());
-        assert!(Neutral::EFFECT.is_typed_pure());
+        assert!(Remove::<1>::EFFECT.is_typed_pure());
+        assert!(HotToCold::<1>::EFFECT.is_typed_pure());
+        assert!(Neutral::<1>::EFFECT.is_typed_pure());
     }
 
     #[test]
     fn catch_all_primitives_have_catch_all_effect() {
-        assert!(!ColdToHot::EFFECT.is_typed_pure());
-        assert!(!Place::EFFECT.is_typed_pure());
+        assert!(!ColdToHot::<1>::EFFECT.is_typed_pure());
+        assert!(!Place::<1>::EFFECT.is_typed_pure());
     }
 
     #[test]
     fn type_level_signature_check_compiles() {
-        // The fact that this function compiles is the test — the
-        // `TotalApply` and `FallibleApply` trait bounds enforce that
-        // each primitive's apply has the signature its EFFECT claims.
         use fulcrum::load::{Fleet, MachineId, Mass};
 
         // Total path.
-        let mut f = Fleet::new();
-        f.add_machine(MachineId(1), 100, 50);
-        let safe: Safe<fulcrum::Linfty> = Safe::new(f, 0.9).unwrap();
-        let _ = assert_total(Remove::new(MachineId(1), Mass(10)), safe);
+        let mut f: Fleet<1> = Fleet::new();
+        f.add_machine(MachineId(1), [100], [50]);
+        let safe: Safe<fulcrum::Linfty<1>, 1> = Safe::new(f, 0.9).unwrap();
+        let _ = assert_total(Remove::new(MachineId(1), Mass([10])), safe);
 
         // Fallible path.
-        let mut f = Fleet::new();
-        f.add_machine(MachineId(1), 100, 50);
-        let safe: Safe<fulcrum::Linfty> = Safe::new(f, 0.9).unwrap();
-        let _ = assert_fallible(Place::new(MachineId(1), Mass(10)), safe);
+        let mut f: Fleet<1> = Fleet::new();
+        f.add_machine(MachineId(1), [100], [50]);
+        let safe: Safe<fulcrum::Linfty<1>, 1> = Safe::new(f, 0.9).unwrap();
+        let _ = assert_fallible(Place::new(MachineId(1), Mass([10])), safe);
 
-        // The compile-time guarantee: swapping (e.g. trying
-        // `assert_total(Place::new(...))`) would not compile because
-        // `Place: !TotalApply<G>`. Same for the inverse with Remove.
+        // Multi-dim variant — same trait bounds, just different N.
+        let mut f2: Fleet<2> = Fleet::new();
+        f2.add_machine(MachineId(1), [100, 100], [50, 30]);
+        let safe2: Safe<fulcrum::Linfty<2>, 2> = Safe::new(f2, 0.9).unwrap();
+        let _ = assert_total(Remove::new(MachineId(1), Mass([5, 5])), safe2);
     }
 }

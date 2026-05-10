@@ -1,130 +1,126 @@
 //! Move kinds: the alphabet.
 //!
-//! Each move kind is a marker around the data needed to apply the move. The
-//! kinds partition by *mathematical effect* on a Schur-convex gauge:
+//! Each move kind is a marker around the data needed to apply the move.
+//! The kinds partition by *mathematical effect* on a Schur-convex gauge:
 //!
 //! | Kind        | Effect                              | `apply`            |
 //! | ----------- | ----------------------------------- | ------------------ |
 //! | `Remove`    | Mass-decreasing                     | total              |
-//! | `HotToCold` | Pigou-Dalton transfer (src > dst)   | total              |
+//! | `HotToCold` | Pigou-Dalton transfer (per-dim)     | total              |
 //! | `Neutral`   | Mass-preserving, equal utilization  | total              |
-//! | `ColdToHot` | Anti-Robin-Hood (src < dst)         | fallible           |
+//! | `ColdToHot` | Anti-Robin-Hood (per-dim)           | fallible           |
 //! | `Place`     | Mass-adding                         | fallible           |
 //!
-//! `HotToCold` and `Neutral` are *witness types* — their public construction
-//! is gated by a fallible check. Once constructed, the `apply` is total. The
-//! actual `apply` impls live in `safe.rs`.
+//! `HotToCold` and `Neutral` are *witness types* — their public
+//! construction is gated by a fallible check. Once constructed, the
+//! `apply` is total. The actual `apply` impls live in `safe.rs`.
+//!
+//! Phase 2 propagates a const-generic dimension `N` through every kind.
+//! Witness conditions become per-dimension: a `HotToCold` is typed-pure
+//! iff each dimension where mass moves independently satisfies the Phase 1
+//! conditions. A move that's Pigou-Dalton in one dimension and anti-
+//! Robin-Hood in another falls through to the catch-all path.
 
 use crate::alphabet::{Effect, Primitive, Sealed};
 use crate::load::{Fleet, MachineId, Mass};
 
-/// Mass removal from a single machine. Mass-decreasing — strictly reduces
-/// any Schur-convex gauge on non-negative load vectors.
+/// Mass removal from a single machine. Mass-decreasing on every dimension
+/// — strictly reduces any monotone Schur-convex gauge on non-negative
+/// load vectors.
 ///
-/// **Totality argument** (proves `apply: Safe<G> -> Safe<G>` is sound):
-/// - For Schur-convex `g`, removing mass `m` from machine `i` produces a new
-///   load vector `x'` with `x' ≤ x` componentwise, hence `x ≻ x'`, hence
-///   `g(x') ≤ g(x)`.
-/// - Therefore `g(x) ≤ τ ⇒ g(x') ≤ τ`.
+/// **Totality argument**:
+/// - The new load vector is componentwise ≤ the old in every dimension.
+/// - The per-machine worst-dim utilization is therefore non-increasing.
+/// - Schur-convex monotone gauges are non-increasing on the resulting
+///   per-machine scalar vector.
 #[derive(Clone, Copy, Debug)]
-pub struct Remove {
+pub struct Remove<const N: usize> {
     pub machine: MachineId,
-    pub mass: Mass,
+    pub mass: Mass<N>,
 }
 
-impl Remove {
+impl<const N: usize> Remove<N> {
     /// Construct a `Remove` move. Always succeeds — `Remove` has no
-    /// preconditions to enforce at construction time. Apply will fail at
-    /// runtime if the machine doesn't exist or has insufficient load, but
-    /// those are well-formedness errors, not gauge violations.
-    pub fn new(machine: MachineId, mass: Mass) -> Self {
+    /// preconditions to enforce at construction time.
+    pub fn new(machine: MachineId, mass: Mass<N>) -> Self {
         Remove { machine, mass }
     }
 }
 
-/// Pigou-Dalton transfer: mass moved from a higher-utilization source to a
-/// lower-utilization destination, in an amount that preserves the order
-/// `util(src) ≥ util(dst)` after the transfer.
+/// Pigou-Dalton transfer, multi-dimensional version: mass moved from a
+/// higher-utilization source to a lower-utilization destination such that
+/// the per-dimension Phase 1 condition holds in every dimension where
+/// mass is non-zero.
 ///
-/// **Construction**: the public constructor is fallible — see [`Self::witness`].
-/// Direct construction is intentionally not provided; the witness check is
-/// the entire point of the type.
-///
-/// **Totality argument** (proves `apply: Safe<G> -> Safe<G>` is sound):
-/// - The witness check guarantees the transfer is a Pigou-Dalton step.
-/// - Pigou-Dalton transfers are majorization-decreasing (Hardy-Littlewood-
-///   Pólya, 1929; Marshall-Olkin-Arnold §1.A).
-/// - Schur-convex gauges are non-increasing under majorization-decreasing
-///   operations: `x ≻ x' ⇒ g(x) ≥ g(x')` (definition of Schur-convex).
-/// - Therefore `g(x) ≤ τ ⇒ g(x') ≤ τ`.
+/// **Construction**: the public constructor is fallible — see
+/// [`Self::witness`]. Direct construction is intentionally not provided;
+/// the witness check is the entire point of the type.
 #[derive(Clone, Copy, Debug)]
-pub struct HotToCold {
+pub struct HotToCold<const N: usize> {
     pub source: MachineId,
     pub destination: MachineId,
-    pub mass: Mass,
+    pub mass: Mass<N>,
     /// Private. Construction requires the witness check to pass.
     _witness: WitnessToken,
 }
 
-impl HotToCold {
+impl<const N: usize> HotToCold<N> {
     /// Construct a `HotToCold` if and only if the move is weak-super-
-    /// majorization-decreasing on the utilization vector against `fleet`:
+    /// majorization-decreasing in every dimension against `fleet`. For
+    /// each dimension `d` where `mass[d] > 0`:
     ///
-    /// 1. Both machines exist and `source ≠ destination`.
-    /// 2. Source utilization > destination utilization (rich → poor on
-    ///    utilization, not on raw load).
-    /// 3. `cap(src) ≤ cap(dst)` — transfer to a same-or-larger machine.
-    ///    A load transfer of mass `m` decreases source utilization by
-    ///    `m/cap(src)` and increases destination utilization by
-    ///    `m/cap(dst)`. The two are equal only when capacities match;
-    ///    otherwise the move shifts the sum of utilizations. When
-    ///    `cap(src) ≤ cap(dst)`, the source-side decrease dominates the
-    ///    destination-side increase, and the resulting vector is
-    ///    weak-super-majorized by the original. When `cap(src) > cap(dst)`
-    ///    the move can increase top-k sums even with `util(src) >
-    ///    util(dst)` — counterexample: caps `(100, 10)`, loads `(80, 5)`,
-    ///    utils `(0.80, 0.50)`; transferring mass 1 yields utils `(0.79,
-    ///    0.60)`, and `SumTopK<2>` increases from 1.30 to 1.39. So
-    ///    high-to-low-cap transfers fall through to the catch-all path.
-    /// 4. `mass ≤ cap(dst) · (util(src) − util(dst))` — the transferred
-    ///    destination-side utilization does not exceed the rich-poor gap.
-    ///    Equivalently in integer arithmetic: `mass · cap(src) ≤
-    ///    load(src) · cap(dst) − load(dst) · cap(src)`. This ensures the
-    ///    new destination utilization is at most the old source
-    ///    utilization, so no coordinate exceeds the previous max.
+    /// 1. `cap(src)[d] ≤ cap(dst)[d]` — transfer to a same-or-larger
+    ///    machine in that dim.
+    /// 2. `util(src)[d] > util(dst)[d]` — rich → poor on utilization.
+    /// 3. `mass[d] · cap(src)[d] ≤ load(src)[d] · cap(dst)[d] −
+    ///    load(dst)[d] · cap(src)[d]` — destination-side utilization gap.
     ///
-    /// When `cap(src) = cap(dst) = c`, conditions 3 and 4 collapse to the
-    /// uniform-capacity rule `mass ≤ load(src) − load(dst)`, recovering
-    /// the v0 witness.
+    /// Dimensions with `mass[d] = 0` are no-ops in that dimension and
+    /// have no condition. The move is rejected if the source equals the
+    /// destination, either machine is unknown, any capacity is zero in a
+    /// dimension where mass moves, or the mass vector is entirely zero
+    /// (no-op).
+    ///
+    /// When `N = 1` and capacities match, this collapses to the Phase 1
+    /// rule, which collapses further to the v0 rule when capacities are
+    /// uniform. The framework's per-dim conditions cleanly subsume both
+    /// earlier versions.
     pub fn witness(
         source: MachineId,
         destination: MachineId,
-        mass: Mass,
-        fleet: &Fleet,
+        mass: Mass<N>,
+        fleet: &Fleet<N>,
     ) -> Option<Self> {
         if source == destination {
             return None;
         }
+        if mass.is_zero() {
+            return None;
+        }
         let src_spec = fleet.spec(source)?;
         let dst_spec = fleet.spec(destination)?;
-        if src_spec.capacity == 0 || dst_spec.capacity == 0 {
-            return None;
-        }
-        if src_spec.capacity > dst_spec.capacity {
-            return None;
-        }
-        // util(src) > util(dst) ⟺ load(src)·cap(dst) > load(dst)·cap(src).
-        // Use u128 to keep the cross product exact for u64 inputs.
-        let load_src_x_cap_dst = src_spec.load as u128 * dst_spec.capacity as u128;
-        let load_dst_x_cap_src = dst_spec.load as u128 * src_spec.capacity as u128;
-        if load_src_x_cap_dst <= load_dst_x_cap_src {
-            return None;
-        }
-        // mass·cap(src) ≤ load(src)·cap(dst) − load(dst)·cap(src).
-        let gap = load_src_x_cap_dst - load_dst_x_cap_src;
-        let mass_x_cap_src = mass.0 as u128 * src_spec.capacity as u128;
-        if mass_x_cap_src > gap {
-            return None;
+        for d in 0..N {
+            if mass.0[d] == 0 {
+                continue;
+            }
+            if src_spec.capacity[d] == 0 || dst_spec.capacity[d] == 0 {
+                return None;
+            }
+            if src_spec.capacity[d] > dst_spec.capacity[d] {
+                return None;
+            }
+            // util(src)[d] > util(dst)[d] in integer cross-product form.
+            let load_src_x_cap_dst = src_spec.load[d] as u128 * dst_spec.capacity[d] as u128;
+            let load_dst_x_cap_src = dst_spec.load[d] as u128 * src_spec.capacity[d] as u128;
+            if load_src_x_cap_dst <= load_dst_x_cap_src {
+                return None;
+            }
+            // mass[d]·cap(src)[d] ≤ load(src)[d]·cap(dst)[d] − load(dst)[d]·cap(src)[d].
+            let gap = load_src_x_cap_dst - load_dst_x_cap_src;
+            let mass_x_cap_src = mass.0[d] as u128 * src_spec.capacity[d] as u128;
+            if mass_x_cap_src > gap {
+                return None;
+            }
         }
         Some(HotToCold {
             source,
@@ -135,40 +131,25 @@ impl HotToCold {
     }
 }
 
-/// Mass-preserving migration between machines at equal utilization. Does not
-/// change majorization order; gauge value unchanged.
-///
-/// **Totality argument**: source and destination at equal utilization means
-/// the load vector after transfer is a permutation of the load vector before,
-/// up to the magnitudes involved. For symmetric gauges (which Schur-convex
-/// gauges are), permutations preserve gauge value.
+/// Mass-preserving migration between machines at equal utilization in
+/// every dimension. Per-dim, equal capacity AND equal load required (the
+/// Permutation effect demands a true coordinate transposition).
 #[derive(Clone, Copy, Debug)]
-pub struct Neutral {
+pub struct Neutral<const N: usize> {
     pub source: MachineId,
     pub destination: MachineId,
-    pub mass: Mass,
+    pub mass: Mass<N>,
     _witness: WitnessToken,
 }
 
-impl Neutral {
+impl<const N: usize> Neutral<N> {
     /// Construct a `Neutral` move if and only if source and destination
-    /// have equal *capacity* and equal *load* (and therefore equal
-    /// utilization). Equal capacity is required because the Permutation
-    /// effect claims the post-move utilization vector is a coordinate
-    /// permutation of the pre-move vector. Under heterogeneous capacity,
-    /// a load transfer of mass `m` shifts source utilization by
-    /// `−m/cap(src)` and destination utilization by `+m/cap(dst)`. The
-    /// two are equal only when `cap(src) = cap(dst)`; otherwise the move
-    /// is no longer a permutation (sum of utilizations changes). Such
-    /// migrations between equal-utilization but unequal-capacity machines
-    /// can still be typed-pure via [`HotToCold::witness`] (the witness
-    /// admits transfers from smaller to larger machines), or through
-    /// the catch-all path otherwise.
+    /// have equal capacity AND equal load in every dimension.
     pub fn witness(
         source: MachineId,
         destination: MachineId,
-        mass: Mass,
-        fleet: &Fleet,
+        mass: Mass<N>,
+        fleet: &Fleet<N>,
     ) -> Option<Self> {
         if source == destination {
             return None;
@@ -181,8 +162,10 @@ impl Neutral {
         if src_spec.load != dst_spec.load {
             return None;
         }
-        if mass.0 > src_spec.load {
-            return None;
+        for d in 0..N {
+            if mass.0[d] > src_spec.load[d] {
+                return None;
+            }
         }
         Some(Neutral {
             source,
@@ -194,18 +177,18 @@ impl Neutral {
 }
 
 /// Anti-Robin-Hood migration: mass from lower-utilization to higher-
-/// utilization machine. Can violate the gauge bound — `apply` is fallible.
-///
-/// No witness type; the runtime check happens in `apply`.
+/// utilization machine in some dimension, or otherwise failing the
+/// per-dim Pigou-Dalton conditions. Can violate the gauge bound — `apply`
+/// is fallible.
 #[derive(Clone, Copy, Debug)]
-pub struct ColdToHot {
+pub struct ColdToHot<const N: usize> {
     pub source: MachineId,
     pub destination: MachineId,
-    pub mass: Mass,
+    pub mass: Mass<N>,
 }
 
-impl ColdToHot {
-    pub fn new(source: MachineId, destination: MachineId, mass: Mass) -> Self {
+impl<const N: usize> ColdToHot<N> {
+    pub fn new(source: MachineId, destination: MachineId, mass: Mass<N>) -> Self {
         ColdToHot { source, destination, mass }
     }
 }
@@ -213,19 +196,19 @@ impl ColdToHot {
 /// Fresh placement of mass on a machine. Mass-adding — can hot-spot.
 /// `apply` is fallible.
 #[derive(Clone, Copy, Debug)]
-pub struct Place {
+pub struct Place<const N: usize> {
     pub machine: MachineId,
-    pub mass: Mass,
+    pub mass: Mass<N>,
 }
 
-impl Place {
-    pub fn new(machine: MachineId, mass: Mass) -> Self {
+impl<const N: usize> Place<N> {
+    pub fn new(machine: MachineId, mass: Mass<N>) -> Self {
         Place { machine, mass }
     }
 }
 
-/// Private token. The presence of one of these inside a move struct is the
-/// type-level evidence that the witness check passed. The token is
+/// Private token. The presence of one of these inside a move struct is
+/// the type-level evidence that the witness check passed. The token is
 /// intentionally not constructible outside this module.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct WitnessToken;
@@ -236,67 +219,69 @@ pub(crate) struct WitnessToken;
 //   1. Define the data type above.
 //   2. Implement `apply` in `safe.rs` with the appropriate signature.
 //   3. Add `Sealed` + `Primitive` impls below with EFFECT/THEOREM/NAME.
-//
-// Each `THEOREM` citation must justify the corresponding `apply` signature.
-// Reviewers verify the citation; users trust the typing thereafter.
 
-impl Sealed for Remove {}
-impl Primitive for Remove {
+impl<const N: usize> Sealed for Remove<N> {}
+impl<const N: usize> Primitive for Remove<N> {
     const EFFECT: Effect = Effect::MassDecreasing;
     const THEOREM: &'static str =
         "Marshall-Olkin §3.A: mass-decreasing on non-negative vectors \
-         strictly reduces every monotone Schur-convex gauge.";
+         strictly reduces every monotone Schur-convex gauge. The N-dim \
+         lift is componentwise: every dimension's per-machine load is \
+         non-increased, so the per-machine worst-dim utilization vector \
+         is also non-increased, and the gauge follows.";
     const NAME: &'static str = "Remove";
 }
 
-impl Sealed for HotToCold {}
-impl Primitive for HotToCold {
+impl<const N: usize> Sealed for HotToCold<N> {}
+impl<const N: usize> Primitive for HotToCold<N> {
     const EFFECT: Effect = Effect::PigouDalton;
     const THEOREM: &'static str =
-        "Hardy-Littlewood-Pólya 1929; Marshall-Olkin §1.A.1, §3.A.8. \
-         Under heterogeneous capacity the witness conditions \
-         (cap(src) ≤ cap(dst); mass·cap(src) ≤ load(src)·cap(dst) − \
-         load(dst)·cap(src)) decompose the load transfer into (i) a \
-         T-transform of size mass/cap(dst) on the utilization vector \
-         (Pigou-Dalton on src and dst, sum-preserving), composed with \
-         (ii) a mass-decrease at src of size mass·(1/cap(src) − \
-         1/cap(dst)) ≥ 0. Both pieces are weak-super-majorization \
-         decreasing on non-negative vectors; their composition is \
-         non-increasing for every monotone Schur-convex gauge — the \
-         Ky Fan family covered by the seal.";
+        "Hardy-Littlewood-Pólya 1929; Marshall-Olkin §1.A.1, §3.A.8, \
+         §15.A. Per-dimension witness conditions enforce that each dim's \
+         load transfer decomposes as a T-transform on that dim's \
+         utilization vector composed with a same-dim mass-decrease at src \
+         (cap(src)[d] ≤ cap(dst)[d] makes the second piece non-negative). \
+         Each per-dim utilization vector is therefore weak-super-\
+         majorization decreasing. The component-wise gauge then takes the \
+         per-machine worst-dim, which is monotone in each dim's vector \
+         under the partial order, and applies a Schur-convex top-K \
+         reduction. Composition non-increases the gauge.";
     const NAME: &'static str = "HotToCold";
 }
 
-impl Sealed for Neutral {}
-impl Primitive for Neutral {
+impl<const N: usize> Sealed for Neutral<N> {}
+impl<const N: usize> Primitive for Neutral<N> {
     const EFFECT: Effect = Effect::Permutation;
     const THEOREM: &'static str =
-        "Symmetric gauges are invariant under coordinate permutation. The \
-         witness requires equal capacity AND equal load at source and \
-         destination, so the post-transfer utilization vector is a \
-         coordinate transposition of the pre-transfer vector within the \
-         equal-utilization class. Schur-convex gauges (here, the Ky Fan \
-         family) are symmetric, so the gauge value is unchanged.";
+        "Symmetric gauges are invariant under coordinate permutation. \
+         The witness requires equal capacity AND equal load in every \
+         dimension, so the post-transfer per-dim utilization vector is a \
+         coordinate transposition of the pre-transfer one in each \
+         dimension. The component-wise gauge composes a per-machine \
+         worst-dim reduction with a Schur-convex top-K, both symmetric, \
+         so the gauge value is unchanged.";
     const NAME: &'static str = "Neutral";
 }
 
-impl Sealed for ColdToHot {}
-impl Primitive for ColdToHot {
+impl<const N: usize> Sealed for ColdToHot<N> {}
+impl<const N: usize> Primitive for ColdToHot<N> {
     const EFFECT: Effect = Effect::MassPreservingFree;
     const THEOREM: &'static str =
-        "Anti-Robin-Hood transfers can produce majorization-incomparable \
-         results; Schur-convex gauges may strictly increase. Catch-all: \
-         apply re-checks the gauge at runtime.";
+        "Anti-Robin-Hood transfers (in any dimension) can produce \
+         majorization-incomparable per-dim utilization vectors; Schur-\
+         convex gauges may strictly increase. Catch-all: apply re-checks \
+         the gauge at runtime.";
     const NAME: &'static str = "ColdToHot";
 }
 
-impl Sealed for Place {}
-impl Primitive for Place {
+impl<const N: usize> Sealed for Place<N> {}
+impl<const N: usize> Primitive for Place<N> {
     const EFFECT: Effect = Effect::MassIncreasing;
     const THEOREM: &'static str =
         "Mass-increasing operations on non-negative vectors can push any \
-         monotone Schur-convex gauge upward (in particular: max utilization \
-         increases when mass is added to the most-loaded machine). \
-         Catch-all: apply re-checks the gauge at runtime.";
+         monotone Schur-convex gauge upward (in particular: max \
+         utilization increases when mass is added to the most-loaded \
+         machine in some dimension). Catch-all: apply re-checks the \
+         gauge at runtime.";
     const NAME: &'static str = "Place";
 }

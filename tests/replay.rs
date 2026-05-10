@@ -23,7 +23,7 @@ fn tiny_trace_classifier_produces_expected_counters() {
     assert_eq!(events.len(), 12, "12 state-changing events expected");
     assert_eq!(dropped, 1, "1 dropped row expected (ENABLE)");
 
-    let result = classify_and_apply::<Linfty>(events, 1_000_000)
+    let result = classify_and_apply::<Linfty<1>>(events, 1_000_000)
         .expect("classify_and_apply failed");
     let c = result.counters;
 
@@ -76,7 +76,7 @@ fn time_sort_is_actually_applied() {
     // CSV before their SCHEDULEs).
     let path = tiny_trace_path();
     let (events, _) = parse_csv(&path).expect("parse failed");
-    let result = classify_and_apply::<Linfty>(events, 1_000_000)
+    let result = classify_and_apply::<Linfty<1>>(events, 1_000_000)
         .expect("classify_and_apply failed");
     assert!(
         result.counters.remove > 0,
