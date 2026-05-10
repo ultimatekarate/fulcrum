@@ -1,0 +1,25 @@
+[package]
+name = "fulcrum"
+version = "0.0.1"
+edition = "2021"
+description = "A typed move algebra for load-balancing invariants under Schur-convex gauges."
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "fulcrum"
+path = "src/lib.rs"
+
+[[example]]
+name = "synthetic"
+path = "examples/synthetic.rs"
+
+[[example]]
+name = "borg_replay"
+path = "examples/borg_replay.rs"
+
+[dependencies]
+csv = "1.3"
+
+[dev-dependencies]
+trybuild = "1.0"

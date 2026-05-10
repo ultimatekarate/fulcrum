@@ -1,0 +1,101 @@
+governance:
+  version: "1.0"
+
+# Fulcrum's internal layering. Three layers, ordered by what may import what:
+#
+#   dictionary: pure data types, gauge declarations, the sealed Primitive
+#               trait. The smallest possible foundation. May import nothing
+#               from inside fulcrum (depends on std types only).
+#
+#   laboratory: pure logic — gauge evaluation, witness construction, apply
+#               impls, the typestate `Safe<G>`. May import dictionary.
+#
+#   hands:      IO-touching code. CSV parsing, replay support. May import
+#               anywhere. The only layer permitted to do file_io.
+
+layers:
+  dictionary:
+    role: "Data types, gauges, alphabet declarations"
+    packages:
+      - "src/alphabet.rs"
+      - "src/gauge.rs"
+      - "src/load.rs"
+      - "src/trace.rs"
+    rules:
+      purity: strict
+    depends_on: []
+
+  laboratory:
+    role: "Algebraic move kinds, typestate, apply impls"
+    packages:
+      - "src/move_kind.rs"
+      - "src/safe.rs"
+    rules:
+      purity: strict
+    depends_on: [dictionary]
+
+  hands:
+    role: "IO, parsing, replay support"
+    packages:
+      - "src/replay.rs"
+    depends_on: [dictionary, laboratory]
+
+# Branded newtypes that must not be replaced with raw integers at API
+# boundaries. The point: a function that takes `u64` could mean anything;
+# a function that takes `Mass` cannot be passed a MachineId by accident.
+newtypes:
+  enabled: true
+  exclude_params: [index, count, offset, len, capacity, threshold]
+  exclude_functions: [len, default, is_empty, capacity]
+  types:
+    - name: Mass
+      wraps: u64
+    - name: MachineId
+      wraps: u64
+
+# Discriminated unions that must be matched exhaustively. Adding a new
+# variant to any of these without updating every match site is a build
+# failure under basis.
+exhaustive_matching:
+  enabled: true
+  unions:
+    - name: Effect
+      variants:
+        - MassDecreasing
+        - PigouDalton
+        - Permutation
+        - MassIncreasing
+        - MassPreservingFree
+    - name: GaugeError
+      variants:
+        - ThresholdExceeded
+        - UnknownMachine
+        - InsufficientLoad
+    - name: EventKind
+      variants:
+        - Schedule
+        - Remove
+    - name: MoveRecord
+      variants:
+        - Remove
+        - HotToCold
+        - Neutral
+        - ColdToHot
+        - Place
+    - name: FleetError
+      variants:
+        - UnknownMachine
+        - InsufficientLoad
+
+# The dictionary and laboratory layers must be pure. The hands layer is
+# allowed to do IO. tests/ and examples/ are not bound by these rules.
+purity:
+  enabled: true
+  forbidden_in_strict:
+    - file_io
+    - network_io
+    - stdout
+    - stderr
+    - env_vars
+    - system_clock
+    - subprocess
