@@ -96,8 +96,7 @@ impl<const K: usize> Gauge for SumTopK<K> {
         if fleet.is_empty() || K == 0 {
             return 0.0;
         }
-        let cap = fleet.capacity() as f64;
-        let mut utils: Vec<f64> = fleet.iter().map(|(_, l)| l as f64 / cap).collect();
+        let mut utils: Vec<f64> = fleet.utilizations().map(|(_, u)| u).collect();
         // Sort descending so the top-K is the prefix.
         utils.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
         utils.iter().take(K).sum()
@@ -147,10 +146,10 @@ pub type Linfty = SumTopK<1>;
 /// use fulcrum::gauge::{Gauge, WeightedKyFan};
 /// use fulcrum::load::{Fleet, MachineId};
 ///
-/// let mut fleet = Fleet::new(100);
-/// fleet.add_machine(MachineId(1), 80);
-/// fleet.add_machine(MachineId(2), 50);
-/// fleet.add_machine(MachineId(3), 30);
+/// let mut fleet = Fleet::new();
+/// fleet.add_machine(MachineId(1), 100, 80);
+/// fleet.add_machine(MachineId(2), 100, 50);
+/// fleet.add_machine(MachineId(3), 100, 30);
 ///
 /// // 1.0 · ‖·‖_(1) + 0.5 · ‖·‖_(2)
 /// // = 0.80 + 0.5 · (0.80 + 0.50)
@@ -192,8 +191,7 @@ impl<const N: usize> Gauge for WeightedKyFan<N> {
         if fleet.is_empty() || N == 0 {
             return 0.0;
         }
-        let cap = fleet.capacity() as f64;
-        let mut utils: Vec<f64> = fleet.iter().map(|(_, l)| l as f64 / cap).collect();
+        let mut utils: Vec<f64> = fleet.utilizations().map(|(_, u)| u).collect();
         utils.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
 
         // Compute Σ_{k=1}^{N} weights[k-1] · (sum of top-k utilizations)
