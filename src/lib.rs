@@ -14,13 +14,15 @@
 //! migrations) are typed as fallible operations, where the runtime check is
 //! unavoidable and visible at every call site.
 //!
-//! ## What's in v0
+//! ## What's in the current build
 //!
-//! - One concrete gauge: [`gauge::Linfty`] (max utilization).
+//! - Gauge family: [`gauge::SumTopK`] (Ky Fan k-norm), [`gauge::Linfty`]
+//!   (alias for `SumTopK<1>`), and [`gauge::WeightedKyFan`] (non-negative
+//!   linear combinations).
 //! - Five move kinds in [`move_kind`]: `Remove`, `HotToCold`, `Neutral`,
 //!   `ColdToHot`, `Place`.
-//! - Single-dimensional load with uniform capacity. Heterogeneous and
-//!   multi-dimensional fleets are future work.
+//! - Single-dimensional load with **heterogeneous per-machine capacity**
+//!   (Phase 1). Multi-dimensional load is Phase 2.
 //!
 //! ## Stability
 //!
@@ -37,7 +39,7 @@ pub mod trace;
 
 pub use alphabet::{Derived, Effect, Primitive};
 pub use gauge::{Gauge, Linfty, SchurConvex, SumTopK};
-pub use load::{Fleet, MachineId, Mass};
+pub use load::{Fleet, MachineId, MachineSpec, Mass};
 pub use move_kind::{ColdToHot, HotToCold, Neutral, Place, Remove};
 pub use safe::{GaugeError, Safe};
 pub use trace::{MoveHistory, MoveRecord};

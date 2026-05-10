@@ -1,13 +1,8 @@
 //! Load-vector primitives.
 //!
-//! v0.2 (heterogeneous capacity): each machine carries its own capacity. The
-//! gauges operate on the resulting per-machine utilization (load / capacity)
-//! rather than on raw load. Pigou-Dalton witness conditions become utilization-
-//! comparison-based rather than load-comparison-based.
-//!
-//! The single remaining v0 simplification is single-dimensional load
-//! (one resource type). Multi-dim is deferred to Phase 2 of the extension
-//! plan.
+//! Phase 1: heterogeneous capacity. Each machine carries its own capacity;
+//! `Fleet` no longer enforces a uniform value. Single-dimensional load
+//! (one resource type) remains a v0 simplification, lifted in Phase 2.
 
 use std::collections::BTreeMap;
 
@@ -21,14 +16,27 @@ pub struct MachineId(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Mass(pub u64);
 
-/// Specification of a machine (immutable structural facts about it). v0.2
-/// has just `capacity`; future versions extend with affinity tags, fault
-/// domain, hardware features, etc.
+/// Per-machine state: current load and total capacity. Both are abstract
+/// scalars in the same unit (e.g., milli-vCPU). Utilization is the ratio.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MachineSpec {
-    /// Capacity of this machine. Mass is consumed against it; utilization is
-    /// `load / capacity`.
+    pub load: u64,
     pub capacity: u64,
+}
+
+impl MachineSpec {
+    /// Utilization as a fraction in [0, 1+]. Exceeds 1.0 if load > capacity
+    /// (which is a gauge violation under any unit-thresholded gauge).
+    pub fn utilization(&self) -> f64 {
+        if self.capacity == 0 {
+            // A zero-capacity machine cannot host load. Treat any positive
+            // load as infinitely utilized so gauge evaluation flags it
+            // immediately rather than dividing by zero.
+            if self.load == 0 { 0.0 } else { f64::INFINITY }
+        } else {
+            self.load as f64 / self.capacity as f64
+        }
+    }
 }
 
 /// State of the fleet at a single instant.
@@ -36,10 +44,9 @@ pub struct MachineSpec {
 /// Owns its machines by value. There is no shared `&Fleet` — `Safe<G>` owns
 /// the fleet, and modifications happen by consuming `Safe<G>` and returning a
 /// new one.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Fleet {
-    /// Per-machine spec and current load.
-    machines: BTreeMap<MachineId, (MachineSpec, u64)>,
+    machines: BTreeMap<MachineId, MachineSpec>,
 }
 
 /// Errors arising from operations that touch the fleet directly. These are
@@ -52,45 +59,44 @@ pub enum FleetError {
 }
 
 impl Fleet {
-    /// Construct an empty fleet.
+    /// Construct an empty fleet. Capacities are now per-machine; pass them
+    /// to [`Fleet::add_machine`] for each machine you register.
     pub fn new() -> Self {
         Fleet { machines: BTreeMap::new() }
     }
 
     /// Add a machine with the given capacity and starting load.
     pub fn add_machine(&mut self, id: MachineId, capacity: u64, initial_load: u64) {
-        self.machines.insert(id, (MachineSpec { capacity }, initial_load));
+        self.machines.insert(id, MachineSpec { load: initial_load, capacity });
     }
 
     /// Capacity of `id`, or `None` if the machine is unknown.
     pub fn capacity_of(&self, id: MachineId) -> Option<u64> {
-        self.machines.get(&id).map(|(spec, _)| spec.capacity)
+        self.machines.get(&id).map(|s| s.capacity)
     }
 
     /// Current load on `id`, or `None` if the machine is unknown.
     pub fn load(&self, id: MachineId) -> Option<u64> {
-        self.machines.get(&id).map(|(_, load)| *load)
+        self.machines.get(&id).map(|s| s.load)
     }
 
-    /// Utilization on `id` as a fraction in `[0, 1+]`, or `None` if unknown.
-    /// May exceed `1.0` if load > capacity (which is a gauge violation under
+    /// Utilization on `id` as a fraction in [0, 1+], or `None` if unknown.
+    /// May exceed 1.0 if load > capacity (which is a gauge violation under
     /// `Linfty` with τ ≤ 1).
     pub fn utilization(&self, id: MachineId) -> Option<f64> {
-        self.machines.get(&id).map(|(spec, load)| {
-            *load as f64 / spec.capacity as f64
-        })
+        self.machines.get(&id).map(|s| s.utilization())
     }
 
-    /// Iterate over `(MachineId, capacity, load)` triples in stable order.
-    pub fn iter(&self) -> impl Iterator<Item = (MachineId, u64, u64)> + '_ {
-        self.machines.iter().map(|(id, (spec, load))| (*id, spec.capacity, *load))
+    /// Borrow the per-machine spec, or `None` if unknown. Witness
+    /// constructors use this to compare the source and destination
+    /// utilizations and capacities in one lookup.
+    pub fn spec(&self, id: MachineId) -> Option<&MachineSpec> {
+        self.machines.get(&id)
     }
 
-    /// Iterate over `(MachineId, utilization)` pairs in stable order.
-    pub fn utilizations(&self) -> impl Iterator<Item = (MachineId, f64)> + '_ {
-        self.machines.iter().map(|(id, (spec, load))| {
-            (*id, *load as f64 / spec.capacity as f64)
-        })
+    /// Iterate over `(MachineId, &MachineSpec)` pairs in stable order.
+    pub fn iter(&self) -> impl Iterator<Item = (MachineId, &MachineSpec)> + '_ {
+        self.machines.iter().map(|(id, spec)| (*id, spec))
     }
 
     /// Number of machines.
@@ -104,8 +110,8 @@ impl Fleet {
 
     /// Crate-internal: add `mass` to a machine's load. Used by `apply` impls.
     pub(crate) fn add_load(&mut self, id: MachineId, mass: Mass) -> Result<(), FleetError> {
-        let (_spec, load) = self.machines.get_mut(&id).ok_or(FleetError::UnknownMachine(id))?;
-        *load = load.saturating_add(mass.0);
+        let spec = self.machines.get_mut(&id).ok_or(FleetError::UnknownMachine(id))?;
+        spec.load = spec.load.saturating_add(mass.0);
         Ok(())
     }
 
@@ -114,15 +120,21 @@ impl Fleet {
     /// move-algebra invariants should keep this branch unreachable in
     /// well-formed programs.
     pub(crate) fn remove_load(&mut self, id: MachineId, mass: Mass) -> Result<(), FleetError> {
-        let (_spec, load) = self.machines.get_mut(&id).ok_or(FleetError::UnknownMachine(id))?;
-        if *load < mass.0 {
+        let spec = self.machines.get_mut(&id).ok_or(FleetError::UnknownMachine(id))?;
+        if spec.load < mass.0 {
             return Err(FleetError::InsufficientLoad {
                 machine: id,
                 requested: mass.0,
-                available: *load,
+                available: spec.load,
             });
         }
-        *load -= mass.0;
+        spec.load -= mass.0;
         Ok(())
+    }
+}
+
+impl Default for Fleet {
+    fn default() -> Self {
+        Fleet::new()
     }
 }

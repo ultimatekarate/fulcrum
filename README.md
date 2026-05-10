@@ -51,14 +51,22 @@ See [PLAN.md](PLAN.md) for the full background, scope, and kill criteria.
 
 ## Status
 
-Pre-1.0. Single-dimensional load with uniform capacity. The gauge family is
-the **Ky Fan k-norm** `SumTopK<K>` plus its non-negative linear span
+Pre-1.0. Single-dimensional load with **heterogeneous per-machine capacity**
+(Phase 1 of the load-balancing extension). The gauge family is the
+**Ky Fan k-norm** `SumTopK<K>` plus its non-negative linear span
 `WeightedKyFan<N>`, with `Linfty = SumTopK<1>` exposed as a type alias. The
 seal on `SchurConvex` is mathematically precise: by Ky Fan dominance, the
 family `{‖·‖_(k)}` generates the majorization order, and non-negative
 combinations are themselves Schur-convex — so the framework covers the
 full non-negative-combinations cone. Five move kinds: `Remove`, `HotToCold`,
 `Neutral`, `ColdToHot`, `Place`.
+
+Under heterogeneous capacity the witness conditions tighten: `HotToCold`
+requires `cap(src) ≤ cap(dst)` and `mass · cap(src) ≤ load(src) · cap(dst)
+− load(dst) · cap(src)` (the destination-side utilization gap), which
+collapses to the v0 rule `mass ≤ load(src) − load(dst)` when capacities
+match. `Neutral` requires equal capacity AND equal load. Multi-dimensional
+load is Phase 2.
 
 The Borg replay example reads a 405K-event subset of the Google 2019
 cluster trace through the typed framework and reports counts by move

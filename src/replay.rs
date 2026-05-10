@@ -124,12 +124,16 @@ pub fn classify_and_apply<G: SchurConvex + Default>(
     events.sort_by_key(|e| e.time);
 
     // Pre-populate the fleet with every machine mentioned by a Schedule.
-    let mut fleet = Fleet::new(capacity);
+    // The Borg trace doesn't include per-machine capacity; the `capacity`
+    // argument is a uniform value applied to every machine. Phase 1's
+    // heterogeneous-capacity Fleet supports this trivially as a degenerate
+    // case (all specs share the same capacity).
+    let mut fleet = Fleet::new();
     let mut seen_machines: std::collections::HashSet<u64> =
         std::collections::HashSet::new();
     for ev in &events {
         if ev.kind == EventKind::Schedule && seen_machines.insert(ev.machine.0) {
-            fleet.add_machine(ev.machine, 0);
+            fleet.add_machine(ev.machine, capacity, 0);
         }
     }
 

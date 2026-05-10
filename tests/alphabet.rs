@@ -177,14 +177,14 @@ mod signature_match {
         use fulcrum::load::{Fleet, MachineId, Mass};
 
         // Total path.
-        let mut f = Fleet::new(100);
-        f.add_machine(MachineId(1), 50);
+        let mut f = Fleet::new();
+        f.add_machine(MachineId(1), 100, 50);
         let safe: Safe<fulcrum::Linfty> = Safe::new(f, 0.9).unwrap();
         let _ = assert_total(Remove::new(MachineId(1), Mass(10)), safe);
 
         // Fallible path.
-        let mut f = Fleet::new(100);
-        f.add_machine(MachineId(1), 50);
+        let mut f = Fleet::new();
+        f.add_machine(MachineId(1), 100, 50);
         let safe: Safe<fulcrum::Linfty> = Safe::new(f, 0.9).unwrap();
         let _ = assert_fallible(Place::new(MachineId(1), Mass(10)), safe);
 

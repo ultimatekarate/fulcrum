@@ -12,9 +12,9 @@
 use fulcrum::{ColdToHot, Fleet, HotToCold, Linfty, MachineId, Mass, Place, Safe};
 
 fn fleet(loads: &[(u64, u64)], capacity: u64) -> Fleet {
-    let mut f = Fleet::new(capacity);
+    let mut f = Fleet::new();
     for &(id, load) in loads {
-        f.add_machine(MachineId(id), load);
+        f.add_machine(MachineId(id), capacity, load);
     }
     f
 }

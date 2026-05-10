@@ -96,7 +96,7 @@ impl<const K: usize> Gauge for SumTopK<K> {
         if fleet.is_empty() || K == 0 {
             return 0.0;
         }
-        let mut utils: Vec<f64> = fleet.utilizations().map(|(_, u)| u).collect();
+        let mut utils: Vec<f64> = fleet.iter().map(|(_, spec)| spec.utilization()).collect();
         // Sort descending so the top-K is the prefix.
         utils.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
         utils.iter().take(K).sum()
@@ -191,7 +191,7 @@ impl<const N: usize> Gauge for WeightedKyFan<N> {
         if fleet.is_empty() || N == 0 {
             return 0.0;
         }
-        let mut utils: Vec<f64> = fleet.utilizations().map(|(_, u)| u).collect();
+        let mut utils: Vec<f64> = fleet.iter().map(|(_, spec)| spec.utilization()).collect();
         utils.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
 
         // Compute Σ_{k=1}^{N} weights[k-1] · (sum of top-k utilizations)
@@ -220,27 +220,29 @@ mod tests {
     use super::*;
     use crate::load::{Fleet, MachineId};
 
+    fn fleet_uniform(loads: &[(u64, u64)], capacity: u64) -> Fleet {
+        let mut f = Fleet::new();
+        for &(id, load) in loads {
+            f.add_machine(MachineId(id), capacity, load);
+        }
+        f
+    }
+
     #[test]
     fn linfty_empty_fleet_is_zero() {
-        let fleet = Fleet::new(100);
+        let fleet = Fleet::new();
         assert_eq!(Linfty::default().eval(&fleet), 0.0);
     }
 
     #[test]
     fn linfty_picks_max_utilization() {
-        let mut fleet = Fleet::new(100);
-        fleet.add_machine(MachineId(1), 30);
-        fleet.add_machine(MachineId(2), 80);
-        fleet.add_machine(MachineId(3), 50);
+        let fleet = fleet_uniform(&[(1, 30), (2, 80), (3, 50)], 100);
         assert!((Linfty::default().eval(&fleet) - 0.80).abs() < 1e-9);
     }
 
     #[test]
     fn sumtopk_sums_top_k_utilizations() {
-        let mut fleet = Fleet::new(100);
-        fleet.add_machine(MachineId(1), 30);
-        fleet.add_machine(MachineId(2), 80);
-        fleet.add_machine(MachineId(3), 50);
+        let fleet = fleet_uniform(&[(1, 30), (2, 80), (3, 50)], 100);
         // top 2 are 80 and 50 → utilizations 0.80 + 0.50 = 1.30
         assert!((SumTopK::<2>::default().eval(&fleet) - 1.30).abs() < 1e-9);
         // top 1 IS Linfty (the alias).
@@ -259,15 +261,8 @@ mod tests {
         // x' = (60, 50, 30). Both have mass 140; x ≻ x'.
         // SumTopK<2> on x = 80 + 30 = 110. On x' = 60 + 50 = 110. Equal.
         // SumTopK<1> on x = 80. On x' = 60. Strict decrease.
-        let mut before = Fleet::new(100);
-        before.add_machine(MachineId(1), 80);
-        before.add_machine(MachineId(2), 30);
-        before.add_machine(MachineId(3), 30);
-
-        let mut after = Fleet::new(100);
-        after.add_machine(MachineId(1), 60);
-        after.add_machine(MachineId(2), 50);
-        after.add_machine(MachineId(3), 30);
+        let before = fleet_uniform(&[(1, 80), (2, 30), (3, 30)], 100);
+        let after = fleet_uniform(&[(1, 60), (2, 50), (3, 30)], 100);
 
         let g2 = SumTopK::<2>::default();
         let g1 = SumTopK::<1>::default();
@@ -277,10 +272,7 @@ mod tests {
 
     #[test]
     fn linfty_is_sumtopk_one() {
-        let mut fleet = Fleet::new(100);
-        fleet.add_machine(MachineId(1), 73);
-        fleet.add_machine(MachineId(2), 19);
-        fleet.add_machine(MachineId(3), 84);
+        let fleet = fleet_uniform(&[(1, 73), (2, 19), (3, 84)], 100);
         let a = Linfty::default().eval(&fleet);
         let b = SumTopK::<1>::default().eval(&fleet);
         assert_eq!(a, b);
@@ -288,10 +280,7 @@ mod tests {
 
     #[test]
     fn weighted_kyfan_combines_norms() {
-        let mut fleet = Fleet::new(100);
-        fleet.add_machine(MachineId(1), 80);
-        fleet.add_machine(MachineId(2), 50);
-        fleet.add_machine(MachineId(3), 30);
+        let fleet = fleet_uniform(&[(1, 80), (2, 50), (3, 30)], 100);
 
         // 1.0 · ‖·‖_(1) + 0.5 · ‖·‖_(2)
         // = 0.80 + 0.5 · (0.80 + 0.50)
@@ -318,14 +307,8 @@ mod tests {
     fn weighted_kyfan_respects_majorization() {
         // Majorization-decreasing transfer reduces or preserves any
         // non-negative weighted Ky Fan combination.
-        let mut before = Fleet::new(100);
-        before.add_machine(MachineId(1), 90);
-        before.add_machine(MachineId(2), 20);
-        before.add_machine(MachineId(3), 10);
-        let mut after = Fleet::new(100);
-        after.add_machine(MachineId(1), 60);
-        after.add_machine(MachineId(2), 40);
-        after.add_machine(MachineId(3), 20);
+        let before = fleet_uniform(&[(1, 90), (2, 20), (3, 10)], 100);
+        let after = fleet_uniform(&[(1, 60), (2, 40), (3, 20)], 100);
 
         // Various non-trivial weight vectors.
         for weights in [[1.0, 0.0], [0.5, 0.5], [0.0, 1.0], [1.0, 0.5]] {
@@ -342,10 +325,7 @@ mod tests {
 
     #[test]
     fn weighted_kyfan_collapses_to_sumtopk_with_unit_weight() {
-        let mut fleet = Fleet::new(100);
-        fleet.add_machine(MachineId(1), 80);
-        fleet.add_machine(MachineId(2), 50);
-        fleet.add_machine(MachineId(3), 30);
+        let fleet = fleet_uniform(&[(1, 80), (2, 50), (3, 30)], 100);
 
         // weights [1.0, 0.0] = pure top-1 = Linfty
         let g_one = WeightedKyFan::new([1.0, 0.0]).unwrap();
@@ -356,5 +336,28 @@ mod tests {
         let g_two = WeightedKyFan::new([0.0, 1.0]).unwrap();
         let sum2 = SumTopK::<2>::default();
         assert!((g_two.eval(&fleet) - sum2.eval(&fleet)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn linfty_under_heterogeneous_capacity() {
+        // Per-machine capacity. Linfty picks the machine with the highest
+        // utilization, regardless of absolute load.
+        let mut fleet = Fleet::new();
+        fleet.add_machine(MachineId(1), 100, 80);  // util 0.80
+        fleet.add_machine(MachineId(2), 200, 100); // util 0.50
+        fleet.add_machine(MachineId(3), 50, 40);   // util 0.80
+        // Load on machine 2 is highest in absolute terms but its
+        // utilization is lower than 1 and 3, which tie at 0.80.
+        assert!((Linfty::default().eval(&fleet) - 0.80).abs() < 1e-9);
+    }
+
+    #[test]
+    fn sumtopk_under_heterogeneous_capacity() {
+        let mut fleet = Fleet::new();
+        fleet.add_machine(MachineId(1), 100, 80);  // util 0.80
+        fleet.add_machine(MachineId(2), 200, 100); // util 0.50
+        fleet.add_machine(MachineId(3), 50, 40);   // util 0.80
+        // Top-2 utilizations: 0.80 + 0.80 = 1.60.
+        assert!((SumTopK::<2>::default().eval(&fleet) - 1.60).abs() < 1e-9);
     }
 }
