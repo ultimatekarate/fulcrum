@@ -18,6 +18,10 @@ path = "examples/synthetic.rs"
 name = "borg_replay"
 path = "examples/borg_replay.rs"
 
+[[example]]
+name = "cluster_twin"
+path = "examples/cluster_twin.rs"
+
 [dependencies]
 csv = "1.3"
 
