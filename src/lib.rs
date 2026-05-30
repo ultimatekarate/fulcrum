@@ -40,20 +40,35 @@
 //! and kill criteria.
 
 pub mod alphabet;
+pub mod cluster;
 pub mod gauge;
+// Private: holds only `impl Gauge<N> for …` eval bodies (the laboratory half
+// of the gauge decl/eval split). Trait impls are in scope crate-wide
+// regardless, so nothing needs to name this module path.
+mod gauge_eval;
 pub mod load;
 pub mod move_kind;
 pub mod planner;
+pub mod power;
+pub mod power_eval;
 pub mod replay;
 pub mod safe;
 pub mod trace;
+pub mod twin;
 
 pub use alphabet::{Derived, Effect, Primitive};
+pub use cluster::{turing_pi_2, NodeProfile, ResourceDim, Topology};
 pub use gauge::{Gauge, Linfty, SchurConvex, SumTopK, WeightedKyFan};
 pub use load::{Fleet, MachineId, MachineSpec, Mass};
 pub use move_kind::{ColdToHot, HotToCold, Neutral, Place, Remove};
 pub use planner::{
     BestFitDecreasing, LeastLoaded, MaxMinFair, Planner, PowerOfTwo, TypedMove,
 };
+pub use power::{Power, PowerBudget, PowerCoeffs};
+pub use power_eval::{fleet_power, node_power};
 pub use safe::{GaugeError, Safe};
 pub use trace::{MoveHistory, MoveRecord};
+pub use twin::{
+    run_turing_pi_2_twin, timeline_to_csv, Sim, SimStats, TimelineRow, TwinConfig, TwinReport,
+    WorkloadGen,
+};
