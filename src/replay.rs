@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 
 use crate::gauge::SchurConvex;
-use crate::load::{Fleet, MachineId, Mass};
+use crate::load::{Capacity, Fleet, MachineId, Mass};
 use crate::move_kind::{ColdToHot, HotToCold, Neutral, Place, Remove};
 use crate::safe::{GaugeError, Safe};
 use crate::trace::{MoveHistory, MoveRecord};
@@ -137,7 +137,7 @@ pub fn classify_and_apply<G: SchurConvex<1> + Default>(
         std::collections::HashSet::new();
     for ev in &events {
         if ev.kind == EventKind::Schedule && seen_machines.insert(ev.machine.0) {
-            fleet.add_machine(ev.machine, [capacity], [0]);
+            fleet.add_machine(ev.machine, Capacity([capacity]), Mass([0]));
         }
     }
 

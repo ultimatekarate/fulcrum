@@ -6,15 +6,16 @@
 //! Run with: `cargo run --example synthetic`
 
 use fulcrum::{
-    Fleet, HotToCold, Linfty, MachineId, Mass, MoveHistory, MoveRecord, Place, Remove, Safe,
+    Capacity, Fleet, HotToCold, Linfty, MachineId, Mass, MoveHistory, MoveRecord, Place, Remove,
+    Safe,
 };
 
 fn main() {
     // Three machines, capacity 100 each, with a hot-spot at machine 1.
     let mut fleet: Fleet<1> = Fleet::new();
-    fleet.add_machine(MachineId(1), [100], [80]);
-    fleet.add_machine(MachineId(2), [100], [30]);
-    fleet.add_machine(MachineId(3), [100], [30]);
+    fleet.add_machine(MachineId(1), Capacity([100]), Mass([80]));
+    fleet.add_machine(MachineId(2), Capacity([100]), Mass([30]));
+    fleet.add_machine(MachineId(3), Capacity([100]), Mass([30]));
 
     let threshold = 0.85;
     let safe: Safe<Linfty<1>, 1> = Safe::new(fleet, threshold)

@@ -77,6 +77,7 @@ impl<const N: usize, G: SchurConvex<N>> Planner<N, G> for MaxMinFair {
         let dst_spec = fleet.spec(dst)?;
         let worst_d = src_spec
             .utilization()
+            .0
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| {

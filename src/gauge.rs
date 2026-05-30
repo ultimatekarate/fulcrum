@@ -150,12 +150,12 @@ impl<const K: usize, const N: usize> SchurConvex<N> for WeightedKyFan<K, N> {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::load::{Fleet, MachineId};
+    use crate::load::{Capacity, Fleet, MachineId, Mass};
 
     fn fleet1_uniform(loads: &[(u64, u64)], capacity: u64) -> Fleet<1> {
         let mut f = Fleet::new();
         for &(id, load) in loads {
-            f.add_machine(MachineId(id), [capacity], [load]);
+            f.add_machine(MachineId(id), Capacity([capacity]), Mass([load]));
         }
         f
     }
@@ -208,17 +208,17 @@ mod tests {
         // skewed (0.20, 0.90). Worst-dim per machine: 0.40 vs 0.90.
         // Linfty picks the worst worst-dim → 0.90.
         let mut f: Fleet<2> = Fleet::new();
-        f.add_machine(MachineId(1), [100, 100], [40, 40]);
-        f.add_machine(MachineId(2), [100, 100], [20, 90]);
+        f.add_machine(MachineId(1), Capacity([100, 100]), Mass([40, 40]));
+        f.add_machine(MachineId(2), Capacity([100, 100]), Mass([20, 90]));
         assert!((Linfty::<2>::default().eval(&f) - 0.90).abs() < 1e-9);
     }
 
     #[test]
     fn sumtopk_multi_dim_uses_per_machine_worst_dim() {
         let mut f: Fleet<2> = Fleet::new();
-        f.add_machine(MachineId(1), [100, 100], [80, 30]); // worst-dim 0.80
-        f.add_machine(MachineId(2), [100, 100], [40, 60]); // worst-dim 0.60
-        f.add_machine(MachineId(3), [100, 100], [10, 50]); // worst-dim 0.50
+        f.add_machine(MachineId(1), Capacity([100, 100]), Mass([80, 30])); // worst-dim 0.80
+        f.add_machine(MachineId(2), Capacity([100, 100]), Mass([40, 60])); // worst-dim 0.60
+        f.add_machine(MachineId(3), Capacity([100, 100]), Mass([10, 50])); // worst-dim 0.50
         // Top-2 worst-dim: 0.80 + 0.60 = 1.40.
         assert!((SumTopK::<2, 2>::default().eval(&f) - 1.40).abs() < 1e-9);
     }
@@ -226,9 +226,9 @@ mod tests {
     #[test]
     fn linfty_under_heterogeneous_capacity_multi_dim() {
         let mut f: Fleet<2> = Fleet::new();
-        f.add_machine(MachineId(1), [100, 200], [80, 80]); // utils (0.80, 0.40), worst 0.80
-        f.add_machine(MachineId(2), [200, 100], [80, 80]); // utils (0.40, 0.80), worst 0.80
-        f.add_machine(MachineId(3), [100, 100], [30, 30]); // utils (0.30, 0.30), worst 0.30
+        f.add_machine(MachineId(1), Capacity([100, 200]), Mass([80, 80])); // utils (0.80, 0.40), worst 0.80
+        f.add_machine(MachineId(2), Capacity([200, 100]), Mass([80, 80])); // utils (0.40, 0.80), worst 0.80
+        f.add_machine(MachineId(3), Capacity([100, 100]), Mass([30, 30])); // utils (0.30, 0.30), worst 0.30
         assert!((Linfty::<2>::default().eval(&f) - 0.80).abs() < 1e-9);
     }
 }

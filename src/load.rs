@@ -34,37 +34,94 @@ impl<const N: usize> Mass<N> {
     }
 }
 
-/// Per-machine state: current load and capacity, both N-dimensional.
+/// Per-dimension capacity of a machine — the denominator of utilization.
+/// Branded so it cannot be swapped with `Mass` (load) at a call boundary:
+/// the two are the same `[u64; N]` underneath but mean opposite things, and
+/// the whole point of the newtype rule is that a swap is a *type* error, not
+/// a silent bug.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Capacity<const N: usize>(pub [u64; N]);
+
+/// Per-dimension utilization (load ÷ capacity) — the carrier the gauges are
+/// Schur-convex over. Distinct from `Mass`/`Capacity` because it is the
+/// *quotient*, not a conserved quantity: a load transfer conserves `Mass`
+/// but does not in general conserve `Utilization` across heterogeneous
+/// capacities. Naming it makes the load↔utilization change-of-basis explicit
+/// rather than an anonymous division scattered through the code.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Utilization<const N: usize>(pub [f64; N]);
+
+impl<const N: usize> Capacity<N> {
+    /// The change-of-basis from the conserved carrier (load) to the gauged
+    /// carrier (utilization). This is the *sole* site in the crate where
+    /// load becomes utilization. Returns infinity for any dimension with
+    /// zero capacity and positive load (so gauges flag the violation rather
+    /// than dividing by zero).
+    pub fn utilization_of(&self, load: &Mass<N>) -> Utilization<N> {
+        let mut out = [0.0; N];
+        for d in 0..N {
+            out[d] = if self.0[d] == 0 {
+                if load.0[d] == 0 { 0.0 } else { f64::INFINITY }
+            } else {
+                load.0[d] as f64 / self.0[d] as f64
+            };
+        }
+        Utilization(out)
+    }
+}
+
+impl<const N: usize> Utilization<N> {
+    /// Worst-dimension utilization. The per-machine scalar reduction the
+    /// component-wise gauges apply before sorting and Ky Fan-ing across the
+    /// fleet.
+    pub fn worst(&self) -> f64 {
+        self.0.iter().copied().fold(0.0_f64, f64::max)
+    }
+}
+
+impl<const N: usize> std::ops::Index<usize> for Mass<N> {
+    type Output = u64;
+    fn index(&self, d: usize) -> &u64 {
+        &self.0[d]
+    }
+}
+
+impl<const N: usize> std::ops::Index<usize> for Capacity<N> {
+    type Output = u64;
+    fn index(&self, d: usize) -> &u64 {
+        &self.0[d]
+    }
+}
+
+impl<const N: usize> std::ops::Index<usize> for Utilization<N> {
+    type Output = f64;
+    fn index(&self, d: usize) -> &f64 {
+        &self.0[d]
+    }
+}
+
+/// Per-machine state: current load and capacity, both N-dimensional and
+/// branded — `load` is a `Mass` (conserved by transfers), `capacity` is a
+/// `Capacity` (the utilization denominator). They are no longer
+/// interchangeable `[u64; N]` arrays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MachineSpec<const N: usize> {
-    pub load: [u64; N],
-    pub capacity: [u64; N],
+    pub load: Mass<N>,
+    pub capacity: Capacity<N>,
 }
 
 impl<const N: usize> MachineSpec<N> {
-    /// Per-dimension utilization. Returns infinity for any dimension with
-    /// zero capacity and positive load (so gauges flag the violation
-    /// rather than dividing by zero).
-    pub fn utilization(&self) -> [f64; N] {
-        let mut out = [0.0; N];
-        for d in 0..N {
-            out[d] = if self.capacity[d] == 0 {
-                if self.load[d] == 0 { 0.0 } else { f64::INFINITY }
-            } else {
-                self.load[d] as f64 / self.capacity[d] as f64
-            };
-        }
-        out
+    /// Per-dimension utilization, via the one change-of-basis
+    /// ([`Capacity::utilization_of`]).
+    pub fn utilization(&self) -> Utilization<N> {
+        self.capacity.utilization_of(&self.load)
     }
 
     /// Worst-dimension utilization. The reduction the component-wise
     /// gauges apply per machine before sorting and Ky Fan-ing across the
     /// fleet.
     pub fn worst_utilization(&self) -> f64 {
-        self.utilization()
-            .iter()
-            .copied()
-            .fold(0.0_f64, f64::max)
+        self.utilization().worst()
     }
 }
 
@@ -99,23 +156,24 @@ impl<const N: usize> Fleet<N> {
     }
 
     /// Add a machine with the given per-dimension capacity and starting
-    /// load.
-    pub fn add_machine(&mut self, id: MachineId, capacity: [u64; N], initial_load: [u64; N]) {
+    /// load. The two vectors are branded (`Capacity` vs `Mass`) so they
+    /// cannot be passed in the wrong order.
+    pub fn add_machine(&mut self, id: MachineId, capacity: Capacity<N>, initial_load: Mass<N>) {
         self.machines.insert(id, MachineSpec { load: initial_load, capacity });
     }
 
     /// Capacity vector for `id`, or `None` if the machine is unknown.
-    pub fn capacity_of(&self, id: MachineId) -> Option<[u64; N]> {
+    pub fn capacity_of(&self, id: MachineId) -> Option<Capacity<N>> {
         self.machines.get(&id).map(|s| s.capacity)
     }
 
     /// Current load on `id`, or `None` if the machine is unknown.
-    pub fn load(&self, id: MachineId) -> Option<[u64; N]> {
+    pub fn load(&self, id: MachineId) -> Option<Mass<N>> {
         self.machines.get(&id).map(|s| s.load)
     }
 
     /// Per-dimension utilization on `id`, or `None` if unknown.
-    pub fn utilization(&self, id: MachineId) -> Option<[f64; N]> {
+    pub fn utilization(&self, id: MachineId) -> Option<Utilization<N>> {
         self.machines.get(&id).map(|s| s.utilization())
     }
 
@@ -150,7 +208,7 @@ impl<const N: usize> Fleet<N> {
     pub(crate) fn add_load(&mut self, id: MachineId, mass: Mass<N>) -> Result<(), FleetError> {
         let spec = self.machines.get_mut(&id).ok_or(FleetError::UnknownMachine(id))?;
         for d in 0..N {
-            spec.load[d] = spec.load[d].saturating_add(mass.0[d]);
+            spec.load.0[d] = spec.load.0[d].saturating_add(mass.0[d]);
         }
         Ok(())
     }
@@ -160,17 +218,17 @@ impl<const N: usize> Fleet<N> {
     pub(crate) fn remove_load(&mut self, id: MachineId, mass: Mass<N>) -> Result<(), FleetError> {
         let spec = self.machines.get_mut(&id).ok_or(FleetError::UnknownMachine(id))?;
         for d in 0..N {
-            if spec.load[d] < mass.0[d] {
+            if spec.load.0[d] < mass.0[d] {
                 return Err(FleetError::InsufficientLoad {
                     machine: id,
                     dimension: d,
                     requested: mass.0[d],
-                    available: spec.load[d],
+                    available: spec.load.0[d],
                 });
             }
         }
         for d in 0..N {
-            spec.load[d] -= mass.0[d];
+            spec.load.0[d] -= mass.0[d];
         }
         Ok(())
     }

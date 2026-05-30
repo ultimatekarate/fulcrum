@@ -54,8 +54,9 @@ impl<const N: usize, G: SchurConvex<N>> Planner<N, G> for BestFitDecreasing<N> {
             .iter()
             .filter(|(_, spec)| {
                 spec.load
+                    .0
                     .iter()
-                    .zip(spec.capacity.iter())
+                    .zip(spec.capacity.0.iter())
                     .zip(mass.0.iter())
                     .all(|((&l, &c), &m)| l.saturating_add(m) <= c)
             })

@@ -15,7 +15,7 @@
 //! it can't be silently relaxed by a planner regression.
 
 use fulcrum::{
-    BestFitDecreasing, Fleet, LeastLoaded, Linfty, MachineId, MaxMinFair, Mass, Planner,
+    BestFitDecreasing, Capacity, Fleet, LeastLoaded, Linfty, MachineId, MaxMinFair, Mass, Planner,
     PowerOfTwo, Safe, TypedMove,
 };
 
@@ -70,7 +70,7 @@ where
 fn empty_fleet_1d_with_capacity(machines: &[(u64, u64)]) -> Fleet<1> {
     let mut f = Fleet::new();
     for &(id, cap) in machines {
-        f.add_machine(MachineId(id), [cap], [0]);
+        f.add_machine(MachineId(id), Capacity([cap]), Mass([0]));
     }
     f
 }
@@ -102,8 +102,8 @@ fn least_loaded_prefers_lighter_machine_under_heterogeneous_caps() {
     // m2: cap 200 with prior load 30 → util 0.15.
     // Same absolute load, but m2 is less utilized; LeastLoaded picks m2.
     let mut f: Fleet<1> = Fleet::new();
-    f.add_machine(MachineId(1), [100], [30]);
-    f.add_machine(MachineId(2), [200], [30]);
+    f.add_machine(MachineId(1), Capacity([100]), Mass([30]));
+    f.add_machine(MachineId(2), Capacity([200]), Mass([30]));
     let safe: Safe<Linfty<1>, 1> = Safe::new(f, 0.99).unwrap();
 
     let mut planner: LeastLoaded<1> = LeastLoaded::new(vec![Mass([10])]);
@@ -162,10 +162,10 @@ fn max_min_fair_balances_an_unbalanced_fleet() {
     // load from the most-loaded to the least-loaded, terminating when
     // the gap drops below epsilon.
     let mut f: Fleet<1> = Fleet::new();
-    f.add_machine(MachineId(1), [100], [80]);
-    f.add_machine(MachineId(2), [100], [70]);
-    f.add_machine(MachineId(3), [100], [10]);
-    f.add_machine(MachineId(4), [100], [10]);
+    f.add_machine(MachineId(1), Capacity([100]), Mass([80]));
+    f.add_machine(MachineId(2), Capacity([100]), Mass([70]));
+    f.add_machine(MachineId(3), Capacity([100]), Mass([10]));
+    f.add_machine(MachineId(4), Capacity([100]), Mass([10]));
 
     let initial_gauge = Linfty::<1>::default();
     use fulcrum::gauge::Gauge;
@@ -213,9 +213,9 @@ fn max_min_fair_no_op_on_already_balanced_fleet() {
     // If the fleet is already balanced, MaxMinFair returns None on the
     // first step.
     let mut f: Fleet<1> = Fleet::new();
-    f.add_machine(MachineId(1), [100], [50]);
-    f.add_machine(MachineId(2), [100], [50]);
-    f.add_machine(MachineId(3), [100], [50]);
+    f.add_machine(MachineId(1), Capacity([100]), Mass([50]));
+    f.add_machine(MachineId(2), Capacity([100]), Mass([50]));
+    f.add_machine(MachineId(3), Capacity([100]), Mass([50]));
 
     let safe: Safe<Linfty<1>, 1> = Safe::new(f, 0.99).unwrap();
     let mut planner = MaxMinFair::new(0.01);
@@ -232,10 +232,10 @@ fn best_fit_decreasing_packs_items() {
     // utilization on individual bins. Total item mass 230 vs total
     // capacity 400; perfectly fittable.
     let mut f: Fleet<1> = Fleet::new();
-    f.add_machine(MachineId(1), [100], [0]);
-    f.add_machine(MachineId(2), [200], [0]);
-    f.add_machine(MachineId(3), [50], [0]);
-    f.add_machine(MachineId(4), [50], [0]);
+    f.add_machine(MachineId(1), Capacity([100]), Mass([0]));
+    f.add_machine(MachineId(2), Capacity([200]), Mass([0]));
+    f.add_machine(MachineId(3), Capacity([50]), Mass([0]));
+    f.add_machine(MachineId(4), Capacity([50]), Mass([0]));
 
     let safe: Safe<Linfty<1>, 1> = Safe::new(f, 1.0).unwrap();
     let items = vec![Mass([80]), Mass([60]), Mass([40]), Mass([30]), Mass([20])];
@@ -254,8 +254,8 @@ fn best_fit_decreasing_skips_infeasible_items() {
     // Item too big to fit anywhere → BFD's filter rejects it, planner
     // returns None at that step.
     let mut f: Fleet<1> = Fleet::new();
-    f.add_machine(MachineId(1), [100], [0]);
-    f.add_machine(MachineId(2), [100], [0]);
+    f.add_machine(MachineId(1), Capacity([100]), Mass([0]));
+    f.add_machine(MachineId(2), Capacity([100]), Mass([0]));
 
     let safe: Safe<Linfty<1>, 1> = Safe::new(f, 0.99).unwrap();
     let mut planner: BestFitDecreasing<1> = BestFitDecreasing::new(vec![Mass([200])]);
@@ -268,9 +268,9 @@ fn best_fit_decreasing_skips_infeasible_items() {
 fn least_loaded_works_in_two_dim() {
     // 2D fleet. Place items with mass in both dims.
     let mut f: Fleet<2> = Fleet::new();
-    f.add_machine(MachineId(1), [100, 100], [0, 0]);
-    f.add_machine(MachineId(2), [100, 100], [0, 0]);
-    f.add_machine(MachineId(3), [100, 100], [0, 0]);
+    f.add_machine(MachineId(1), Capacity([100, 100]), Mass([0, 0]));
+    f.add_machine(MachineId(2), Capacity([100, 100]), Mass([0, 0]));
+    f.add_machine(MachineId(3), Capacity([100, 100]), Mass([0, 0]));
 
     let safe: Safe<Linfty<2>, 2> = Safe::new(f, 0.99).unwrap();
     let items = vec![Mass([10, 10]), Mass([10, 10]), Mass([10, 10]), Mass([10, 10])];
@@ -290,8 +290,8 @@ fn max_min_fair_works_in_two_dim_when_imbalance_lies_in_one_dim() {
     // machine: m1=0.80, m2=0.20. MaxMinFair migrates in m1's worst dim
     // (dim 0) toward m2.
     let mut f: Fleet<2> = Fleet::new();
-    f.add_machine(MachineId(1), [100, 100], [80, 20]);
-    f.add_machine(MachineId(2), [100, 100], [20, 20]);
+    f.add_machine(MachineId(1), Capacity([100, 100]), Mass([80, 20]));
+    f.add_machine(MachineId(2), Capacity([100, 100]), Mass([20, 20]));
 
     let safe: Safe<Linfty<2>, 2> = Safe::new(f, 0.99).unwrap();
     let initial = safe.gauge();
@@ -312,8 +312,8 @@ fn typed_move_is_typed_pure_classifies_correctly() {
     // Smoke test of TypedMove::is_typed_pure across all five variants.
     use fulcrum::{ColdToHot, HotToCold, Neutral, Place, Remove};
     let mut f: Fleet<1> = Fleet::new();
-    f.add_machine(MachineId(1), [100], [50]);
-    f.add_machine(MachineId(2), [100], [30]);
+    f.add_machine(MachineId(1), Capacity([100]), Mass([50]));
+    f.add_machine(MachineId(2), Capacity([100]), Mass([30]));
 
     let r: TypedMove<1> = TypedMove::Remove(Remove::new(MachineId(1), Mass([5])));
     let h = TypedMove::HotToCold(
@@ -321,8 +321,8 @@ fn typed_move_is_typed_pure_classifies_correctly() {
     );
     // Build a Neutral on a separate equal-load fleet.
     let mut feq: Fleet<1> = Fleet::new();
-    feq.add_machine(MachineId(1), [100], [50]);
-    feq.add_machine(MachineId(2), [100], [50]);
+    feq.add_machine(MachineId(1), Capacity([100]), Mass([50]));
+    feq.add_machine(MachineId(2), Capacity([100]), Mass([50]));
     let n = TypedMove::Neutral(
         Neutral::witness(MachineId(1), MachineId(2), Mass([5]), &feq).unwrap(),
     );

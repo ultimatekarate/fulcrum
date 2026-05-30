@@ -70,11 +70,17 @@ layers:
 # a function that takes `Mass` cannot be passed a MachineId by accident.
 newtypes:
   enabled: true
-  exclude_params: [index, count, offset, len, capacity, threshold]
+  exclude_params: [index, count, offset, len, threshold]
   exclude_functions: [len, default, is_empty, capacity, zero, is_zero]
   types:
     - name: Mass
       wraps: "[u64; N]"
+      const_generic: N
+    - name: Capacity
+      wraps: "[u64; N]"
+      const_generic: N
+    - name: Utilization
+      wraps: "[f64; N]"
       const_generic: N
     - name: MachineId
       wraps: u64

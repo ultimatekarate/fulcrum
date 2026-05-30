@@ -8,7 +8,7 @@
 //! in Phase 2.
 
 use fulcrum::gauge::Gauge;
-use fulcrum::{Fleet, HotToCold, Linfty, MachineId, Mass, Neutral, Safe, SumTopK};
+use fulcrum::{Capacity, Fleet, HotToCold, Linfty, MachineId, Mass, Neutral, Safe, SumTopK};
 
 fn assert_le(actual: f64, threshold: f64, msg: &str) {
     assert!(
@@ -23,8 +23,8 @@ fn assert_le(actual: f64, threshold: f64, msg: &str) {
 #[test]
 fn utilization_compares_via_per_machine_capacity() {
     let mut f: Fleet<1> = Fleet::new();
-    f.add_machine(MachineId(1), [100], [80]);
-    f.add_machine(MachineId(2), [200], [80]);
+    f.add_machine(MachineId(1), Capacity([100]), Mass([80]));
+    f.add_machine(MachineId(2), Capacity([200]), Mass([80]));
 
     assert!((f.utilization(MachineId(1)).unwrap()[0] - 0.80).abs() < 1e-9);
     assert!((f.utilization(MachineId(2)).unwrap()[0] - 0.40).abs() < 1e-9);
@@ -35,8 +35,8 @@ fn utilization_compares_via_per_machine_capacity() {
 #[test]
 fn hot_to_cold_uses_utilization_not_load() {
     let mut f: Fleet<1> = Fleet::new();
-    f.add_machine(MachineId(1), [100], [80]);
-    f.add_machine(MachineId(2), [200], [80]);
+    f.add_machine(MachineId(1), Capacity([100]), Mass([80]));
+    f.add_machine(MachineId(2), Capacity([200]), Mass([80]));
 
     let w = HotToCold::witness(MachineId(1), MachineId(2), Mass([10]), &f);
     assert!(
@@ -56,8 +56,8 @@ fn hot_to_cold_rejects_high_to_low_capacity() {
     // util(src) > util(dst) but cap(src) > cap(dst). The transfer can
     // increase top-k sums under SumTopK<2>; reject as typed-pure.
     let mut f: Fleet<1> = Fleet::new();
-    f.add_machine(MachineId(1), [100], [80]);
-    f.add_machine(MachineId(2), [10], [5]);
+    f.add_machine(MachineId(1), Capacity([100]), Mass([80]));
+    f.add_machine(MachineId(2), Capacity([10]), Mass([5]));
 
     let w = HotToCold::witness(MachineId(1), MachineId(2), Mass([1]), &f);
     assert!(
@@ -73,12 +73,12 @@ fn cap_src_le_cap_dst_restriction_is_necessary_for_soundness() {
     // would actually exceed the gauge threshold; the witness's rejection
     // is pinned to a concrete unsoundness.
     let mut before: Fleet<1> = Fleet::new();
-    before.add_machine(MachineId(1), [100], [80]);
-    before.add_machine(MachineId(2), [10], [5]);
+    before.add_machine(MachineId(1), Capacity([100]), Mass([80]));
+    before.add_machine(MachineId(2), Capacity([10]), Mass([5]));
 
     let mut after: Fleet<1> = Fleet::new();
-    after.add_machine(MachineId(1), [100], [79]);
-    after.add_machine(MachineId(2), [10], [6]);
+    after.add_machine(MachineId(1), Capacity([100]), Mass([79]));
+    after.add_machine(MachineId(2), Capacity([10]), Mass([6]));
 
     let g = SumTopK::<2, 1>::default();
     let g_before = g.eval(&before);
@@ -107,8 +107,8 @@ fn cap_src_le_cap_dst_restriction_is_necessary_for_soundness() {
 #[test]
 fn hot_to_cold_collapses_to_v0_under_uniform_capacity() {
     let mut f: Fleet<1> = Fleet::new();
-    f.add_machine(MachineId(1), [100], [80]);
-    f.add_machine(MachineId(2), [100], [30]);
+    f.add_machine(MachineId(1), Capacity([100]), Mass([80]));
+    f.add_machine(MachineId(2), Capacity([100]), Mass([30]));
 
     assert!(
         HotToCold::witness(MachineId(1), MachineId(2), Mass([50]), &f).is_some(),
@@ -119,8 +119,8 @@ fn hot_to_cold_collapses_to_v0_under_uniform_capacity() {
         "mass > load_src - load_dst must fail under uniform capacity"
     );
     let mut g: Fleet<1> = Fleet::new();
-    g.add_machine(MachineId(1), [100], [50]);
-    g.add_machine(MachineId(2), [100], [50]);
+    g.add_machine(MachineId(1), Capacity([100]), Mass([50]));
+    g.add_machine(MachineId(2), Capacity([100]), Mass([50]));
     assert!(
         HotToCold::witness(MachineId(1), MachineId(2), Mass([1]), &g).is_none(),
         "equal utilization must reject HotToCold"
@@ -130,8 +130,8 @@ fn hot_to_cold_collapses_to_v0_under_uniform_capacity() {
 #[test]
 fn hot_to_cold_admits_more_mass_when_destination_is_larger() {
     let mut f: Fleet<1> = Fleet::new();
-    f.add_machine(MachineId(1), [100], [80]);
-    f.add_machine(MachineId(2), [1000], [100]);
+    f.add_machine(MachineId(1), Capacity([100]), Mass([80]));
+    f.add_machine(MachineId(2), Capacity([1000]), Mass([100]));
 
     let w = HotToCold::witness(MachineId(1), MachineId(2), Mass([80]), &f);
     assert!(w.is_some(), "transfer to a larger machine should admit larger mass");
@@ -140,9 +140,9 @@ fn hot_to_cold_admits_more_mass_when_destination_is_larger() {
 #[test]
 fn hot_to_cold_apply_preserves_safety_with_heterogeneous_caps() {
     let mut f: Fleet<1> = Fleet::new();
-    f.add_machine(MachineId(1), [100], [80]);
-    f.add_machine(MachineId(2), [200], [80]);
-    f.add_machine(MachineId(3), [100], [30]);
+    f.add_machine(MachineId(1), Capacity([100]), Mass([80]));
+    f.add_machine(MachineId(2), Capacity([200]), Mass([80]));
+    f.add_machine(MachineId(3), Capacity([100]), Mass([30]));
 
     let safe: Safe<Linfty<1>, 1> = Safe::new(f, 0.85).unwrap();
     let g_before = safe.gauge();
@@ -157,9 +157,9 @@ fn hot_to_cold_apply_preserves_safety_with_heterogeneous_caps() {
 #[test]
 fn hot_to_cold_apply_preserves_sumtopk_with_heterogeneous_caps() {
     let mut f: Fleet<1> = Fleet::new();
-    f.add_machine(MachineId(1), [100], [80]);
-    f.add_machine(MachineId(2), [200], [80]);
-    f.add_machine(MachineId(3), [100], [30]);
+    f.add_machine(MachineId(1), Capacity([100]), Mass([80]));
+    f.add_machine(MachineId(2), Capacity([200]), Mass([80]));
+    f.add_machine(MachineId(3), Capacity([100]), Mass([30]));
 
     let g2 = SumTopK::<2, 1>::default();
     let before = g2.eval(&f);
@@ -176,16 +176,16 @@ fn hot_to_cold_apply_preserves_sumtopk_with_heterogeneous_caps() {
 #[test]
 fn neutral_admits_only_equal_capacity() {
     let mut f: Fleet<1> = Fleet::new();
-    f.add_machine(MachineId(1), [100], [50]);
-    f.add_machine(MachineId(2), [200], [100]);
+    f.add_machine(MachineId(1), Capacity([100]), Mass([50]));
+    f.add_machine(MachineId(2), Capacity([200]), Mass([100]));
     assert!(
         Neutral::witness(MachineId(1), MachineId(2), Mass([10]), &f).is_none(),
         "Neutral must require equal capacity"
     );
 
     let mut g: Fleet<1> = Fleet::new();
-    g.add_machine(MachineId(1), [100], [50]);
-    g.add_machine(MachineId(2), [100], [50]);
+    g.add_machine(MachineId(1), Capacity([100]), Mass([50]));
+    g.add_machine(MachineId(2), Capacity([100]), Mass([50]));
     assert!(
         Neutral::witness(MachineId(1), MachineId(2), Mass([10]), &g).is_some(),
         "Neutral must admit equal-capacity equal-load pair"
@@ -195,7 +195,7 @@ fn neutral_admits_only_equal_capacity() {
 #[test]
 fn unknown_machine_returns_none() {
     let mut f: Fleet<1> = Fleet::new();
-    f.add_machine(MachineId(1), [100], [80]);
+    f.add_machine(MachineId(1), Capacity([100]), Mass([80]));
     assert!(HotToCold::witness(MachineId(1), MachineId(99), Mass([10]), &f).is_none());
     assert!(HotToCold::witness(MachineId(99), MachineId(1), Mass([10]), &f).is_none());
     assert!(Neutral::witness(MachineId(1), MachineId(99), Mass([10]), &f).is_none());
@@ -204,8 +204,8 @@ fn unknown_machine_returns_none() {
 #[test]
 fn zero_capacity_machine_rejects_witness() {
     let mut f: Fleet<1> = Fleet::new();
-    f.add_machine(MachineId(1), [0], [0]);
-    f.add_machine(MachineId(2), [100], [50]);
+    f.add_machine(MachineId(1), Capacity([0]), Mass([0]));
+    f.add_machine(MachineId(2), Capacity([100]), Mass([50]));
     assert!(HotToCold::witness(MachineId(2), MachineId(1), Mass([1]), &f).is_none());
     assert!(HotToCold::witness(MachineId(1), MachineId(2), Mass([1]), &f).is_none());
 }
@@ -213,10 +213,10 @@ fn zero_capacity_machine_rejects_witness() {
 #[test]
 fn long_chain_of_heterogeneous_transfers_stays_safe() {
     let mut f: Fleet<1> = Fleet::new();
-    f.add_machine(MachineId(1), [100], [80]);
-    f.add_machine(MachineId(2), [200], [60]);
-    f.add_machine(MachineId(3), [400], [80]);
-    f.add_machine(MachineId(4), [100], [80]);
+    f.add_machine(MachineId(1), Capacity([100]), Mass([80]));
+    f.add_machine(MachineId(2), Capacity([200]), Mass([60]));
+    f.add_machine(MachineId(3), Capacity([400]), Mass([80]));
+    f.add_machine(MachineId(4), Capacity([100]), Mass([80]));
 
     let safe: Safe<Linfty<1>, 1> = Safe::new(f, 0.85).unwrap();
 

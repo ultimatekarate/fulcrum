@@ -9,12 +9,12 @@
 //! These tests are the v0 evidence that the framework is doing more than
 //! re-implementing per-sled capacity checks.
 
-use fulcrum::{ColdToHot, Fleet, HotToCold, Linfty, MachineId, Mass, Place, Safe};
+use fulcrum::{Capacity, ColdToHot, Fleet, HotToCold, Linfty, MachineId, Mass, Place, Safe};
 
 fn fleet(loads: &[(u64, u64)], capacity: u64) -> Fleet<1> {
     let mut f = Fleet::new();
     for &(id, load) in loads {
-        f.add_machine(MachineId(id), [capacity], [load]);
+        f.add_machine(MachineId(id), Capacity([capacity]), Mass([load]));
     }
     f
 }

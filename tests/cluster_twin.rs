@@ -2,8 +2,8 @@
 //! topology shape, and end-to-end determinism / budget adherence.
 
 use fulcrum::{
-    fleet_power, node_power, run_turing_pi_2_twin, turing_pi_2, Fleet, HotToCold, Linfty, MachineId,
-    Mass, Power, PowerBudget, PowerCoeffs, ResourceDim, Safe,
+    fleet_power, node_power, run_turing_pi_2_twin, turing_pi_2, Capacity, Fleet, HotToCold, Linfty,
+    MachineId, Mass, Power, PowerBudget, PowerCoeffs, ResourceDim, Safe,
 };
 
 fn coeffs(idle: f64, dynamic: f64) -> PowerCoeffs {
@@ -63,8 +63,8 @@ fn hot_to_cold_does_not_increase_power() {
     let cs = vec![c, c];
 
     let mut fleet: Fleet<4> = Fleet::new();
-    fleet.add_machine(MachineId(1), [100, 100, 100, 100], [80, 0, 0, 0]);
-    fleet.add_machine(MachineId(2), [100, 100, 100, 100], [20, 0, 0, 0]);
+    fleet.add_machine(MachineId(1), Capacity([100, 100, 100, 100]), Mass([80, 0, 0, 0]));
+    fleet.add_machine(MachineId(2), Capacity([100, 100, 100, 100]), Mass([20, 0, 0, 0]));
 
     let before = fleet_power(&fleet, &cs).milliwatts();
 

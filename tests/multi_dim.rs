@@ -17,7 +17,8 @@
 
 use fulcrum::gauge::Gauge;
 use fulcrum::{
-    ColdToHot, Fleet, HotToCold, Linfty, MachineId, Mass, Neutral, Place, Remove, Safe, SumTopK,
+    Capacity, ColdToHot, Fleet, HotToCold, Linfty, MachineId, Mass, Neutral, Place, Remove, Safe,
+    SumTopK, Utilization,
 };
 
 fn assert_le(actual: f64, threshold: f64, msg: &str) {
@@ -39,8 +40,8 @@ fn two_dim_transfer_typed_pure_when_dominance_holds_in_both_dims() {
     //   m1 → utils (0.70, 0.65). m2 → utils (0.40, 0.25).
     // Per-dim Pigou-Dalton in both. Typed-pure.
     let mut f: Fleet<2> = Fleet::new();
-    f.add_machine(MachineId(1), [100, 100], [80, 70]);
-    f.add_machine(MachineId(2), [100, 100], [30, 20]);
+    f.add_machine(MachineId(1), Capacity([100, 100]), Mass([80, 70]));
+    f.add_machine(MachineId(2), Capacity([100, 100]), Mass([30, 20]));
 
     let w = HotToCold::witness(MachineId(1), MachineId(2), Mass([10, 5]), &f);
     assert!(w.is_some(), "transfer dominant in both dims must be typed-pure");
@@ -56,8 +57,8 @@ fn two_dim_transfer_rejected_when_one_dim_is_anti_robin_hood() {
     //   m1: caps (100, 100), loads (80, 20). utils (0.80, 0.20).
     //   m2: caps (100, 100), loads (30, 70). utils (0.30, 0.70).
     let mut f: Fleet<2> = Fleet::new();
-    f.add_machine(MachineId(1), [100, 100], [80, 20]);
-    f.add_machine(MachineId(2), [100, 100], [30, 70]);
+    f.add_machine(MachineId(1), Capacity([100, 100]), Mass([80, 20]));
+    f.add_machine(MachineId(2), Capacity([100, 100]), Mass([30, 70]));
 
     // Mass that moves in both dims: dim 0 is rich-to-poor, dim 1 is
     // poor-to-rich. Witness must reject.
@@ -83,15 +84,15 @@ fn two_dim_unsoundness_pinned_to_concrete_gauge_violation() {
     // dim 0 has cap_src > cap_dst, so the dim-0 transfer can lift the
     // gauge. Verify the post-transfer fleet exceeds the threshold.
     let mut before: Fleet<2> = Fleet::new();
-    before.add_machine(MachineId(1), [100, 100], [80, 30]);
-    before.add_machine(MachineId(2), [10, 100], [5, 30]);
+    before.add_machine(MachineId(1), Capacity([100, 100]), Mass([80, 30]));
+    before.add_machine(MachineId(2), Capacity([10, 100]), Mass([5, 30]));
 
     // After transferring Mass([1, 0]) (dim 0 only):
     //   m1: loads (79, 30) → utils (0.79, 0.30) → worst 0.79
     //   m2: loads (6, 30)  → utils (0.60, 0.30) → worst 0.60
     let mut after: Fleet<2> = Fleet::new();
-    after.add_machine(MachineId(1), [100, 100], [79, 30]);
-    after.add_machine(MachineId(2), [10, 100], [6, 30]);
+    after.add_machine(MachineId(1), Capacity([100, 100]), Mass([79, 30]));
+    after.add_machine(MachineId(2), Capacity([10, 100]), Mass([6, 30]));
 
     let g = SumTopK::<2, 2>::default();
     let g_before = g.eval(&before);
@@ -111,9 +112,9 @@ fn two_dim_apply_preserves_safety() {
     // End-to-end: apply a typed-pure 2D transfer and verify the gauge
     // bound holds.
     let mut f: Fleet<2> = Fleet::new();
-    f.add_machine(MachineId(1), [100, 100], [80, 70]);
-    f.add_machine(MachineId(2), [100, 100], [30, 20]);
-    f.add_machine(MachineId(3), [100, 100], [40, 50]);
+    f.add_machine(MachineId(1), Capacity([100, 100]), Mass([80, 70]));
+    f.add_machine(MachineId(2), Capacity([100, 100]), Mass([30, 20]));
+    f.add_machine(MachineId(3), Capacity([100, 100]), Mass([40, 50]));
 
     let safe: Safe<Linfty<2>, 2> = Safe::new(f, 0.85).unwrap();
     let g_before = safe.gauge();
@@ -130,8 +131,8 @@ fn place_in_multi_dim_can_violate_threshold() {
     // Per-machine worst-dim is what matters. A `Place` that pushes any
     // dim over threshold gets rejected.
     let mut f: Fleet<2> = Fleet::new();
-    f.add_machine(MachineId(1), [100, 100], [80, 50]);
-    f.add_machine(MachineId(2), [100, 100], [30, 30]);
+    f.add_machine(MachineId(1), Capacity([100, 100]), Mass([80, 50]));
+    f.add_machine(MachineId(2), Capacity([100, 100]), Mass([30, 30]));
 
     let safe: Safe<Linfty<2>, 2> = Safe::new(f, 0.85).unwrap();
 
@@ -148,8 +149,8 @@ fn place_in_multi_dim_can_violate_threshold() {
 fn place_in_quiet_dim_does_not_violate() {
     // Place that only adds in a dim where there's headroom.
     let mut f: Fleet<2> = Fleet::new();
-    f.add_machine(MachineId(1), [100, 100], [80, 30]);
-    f.add_machine(MachineId(2), [100, 100], [30, 30]);
+    f.add_machine(MachineId(1), Capacity([100, 100]), Mass([80, 30]));
+    f.add_machine(MachineId(2), Capacity([100, 100]), Mass([30, 30]));
 
     let safe: Safe<Linfty<2>, 2> = Safe::new(f, 0.85).unwrap();
     // dim 0 stays at 80 (worst-dim already), dim 1 grows to 0.40. Worst-dim
@@ -163,8 +164,8 @@ fn place_in_quiet_dim_does_not_violate() {
 fn neutral_in_multi_dim_requires_full_equality() {
     // Same caps, same loads in every dim → admitted.
     let mut f: Fleet<2> = Fleet::new();
-    f.add_machine(MachineId(1), [100, 200], [50, 80]);
-    f.add_machine(MachineId(2), [100, 200], [50, 80]);
+    f.add_machine(MachineId(1), Capacity([100, 200]), Mass([50, 80]));
+    f.add_machine(MachineId(2), Capacity([100, 200]), Mass([50, 80]));
     assert!(
         Neutral::witness(MachineId(1), MachineId(2), Mass([10, 5]), &f).is_some(),
         "Neutral admitted with equal caps and loads in every dim"
@@ -172,8 +173,8 @@ fn neutral_in_multi_dim_requires_full_equality() {
 
     // Mismatched in one dim → rejected.
     let mut g: Fleet<2> = Fleet::new();
-    g.add_machine(MachineId(1), [100, 200], [50, 80]);
-    g.add_machine(MachineId(2), [100, 200], [50, 79]);
+    g.add_machine(MachineId(1), Capacity([100, 200]), Mass([50, 80]));
+    g.add_machine(MachineId(2), Capacity([100, 200]), Mass([50, 79]));
     assert!(
         Neutral::witness(MachineId(1), MachineId(2), Mass([10, 5]), &g).is_none(),
         "Neutral rejected when loads differ in any dim"
@@ -186,8 +187,8 @@ fn cold_to_hot_classifies_anti_robin_hood_in_dim_one() {
     // in dim 1; the witness refuses, so they fall through to ColdToHot
     // (catch-all) which re-checks the gauge.
     let mut f: Fleet<2> = Fleet::new();
-    f.add_machine(MachineId(1), [100, 100], [80, 20]);
-    f.add_machine(MachineId(2), [100, 100], [30, 70]);
+    f.add_machine(MachineId(1), Capacity([100, 100]), Mass([80, 20]));
+    f.add_machine(MachineId(2), Capacity([100, 100]), Mass([30, 70]));
 
     let safe: Safe<Linfty<2>, 2> = Safe::new(f, 0.85).unwrap();
 
@@ -209,10 +210,10 @@ fn long_chain_of_two_dim_transfers_stays_safe() {
     // Compose a sequence of 2D typed-pure moves; verify the gauge stays
     // bounded throughout.
     let mut f: Fleet<2> = Fleet::new();
-    f.add_machine(MachineId(1), [100, 100], [80, 70]);
-    f.add_machine(MachineId(2), [200, 200], [60, 50]);
-    f.add_machine(MachineId(3), [100, 100], [40, 30]);
-    f.add_machine(MachineId(4), [200, 200], [80, 60]);
+    f.add_machine(MachineId(1), Capacity([100, 100]), Mass([80, 70]));
+    f.add_machine(MachineId(2), Capacity([200, 200]), Mass([60, 50]));
+    f.add_machine(MachineId(3), Capacity([100, 100]), Mass([40, 30]));
+    f.add_machine(MachineId(4), Capacity([200, 200]), Mass([80, 60]));
 
     let safe: Safe<Linfty<2>, 2> = Safe::new(f, 0.85).unwrap();
 
@@ -237,19 +238,19 @@ fn long_chain_of_two_dim_transfers_stays_safe() {
 fn worst_dim_reduction_is_correct() {
     // Verify the per-machine worst-dim reduction directly.
     let mut f: Fleet<3> = Fleet::new();
-    f.add_machine(MachineId(1), [100, 100, 100], [50, 80, 30]);
+    f.add_machine(MachineId(1), Capacity([100, 100, 100]), Mass([50, 80, 30]));
 
     let spec = f.spec(MachineId(1)).unwrap();
     assert!((spec.worst_utilization() - 0.80).abs() < 1e-9);
-    assert_eq!(spec.utilization(), [0.50, 0.80, 0.30]);
+    assert_eq!(spec.utilization(), Utilization([0.50, 0.80, 0.30]));
 }
 
 #[test]
 fn higher_n_compiles_and_runs() {
     // Smoke test: 4-dim fleet (e.g., CPU + memory + disk + network).
     let mut f: Fleet<4> = Fleet::new();
-    f.add_machine(MachineId(1), [100, 100, 100, 100], [10, 20, 30, 40]);
-    f.add_machine(MachineId(2), [100, 100, 100, 100], [5, 5, 5, 5]);
+    f.add_machine(MachineId(1), Capacity([100, 100, 100, 100]), Mass([10, 20, 30, 40]));
+    f.add_machine(MachineId(2), Capacity([100, 100, 100, 100]), Mass([5, 5, 5, 5]));
 
     let safe: Safe<Linfty<4>, 4> = Safe::new(f, 0.50).unwrap();
     assert!((safe.gauge() - 0.40).abs() < 1e-9);
@@ -265,8 +266,8 @@ fn higher_n_compiles_and_runs() {
 fn zero_mass_witness_rejected() {
     // A no-op move is not a meaningful HotToCold; reject.
     let mut f: Fleet<2> = Fleet::new();
-    f.add_machine(MachineId(1), [100, 100], [80, 70]);
-    f.add_machine(MachineId(2), [100, 100], [30, 20]);
+    f.add_machine(MachineId(1), Capacity([100, 100]), Mass([80, 70]));
+    f.add_machine(MachineId(2), Capacity([100, 100]), Mass([30, 20]));
     assert!(HotToCold::witness(MachineId(1), MachineId(2), Mass([0, 0]), &f).is_none());
 }
 
@@ -276,8 +277,8 @@ fn multi_dim_neutral_admits_partial_mass() {
     // the other is still a valid permutation in the dim where mass moves
     // and a no-op in the dim where it doesn't.
     let mut f: Fleet<2> = Fleet::new();
-    f.add_machine(MachineId(1), [100, 100], [50, 50]);
-    f.add_machine(MachineId(2), [100, 100], [50, 50]);
+    f.add_machine(MachineId(1), Capacity([100, 100]), Mass([50, 50]));
+    f.add_machine(MachineId(2), Capacity([100, 100]), Mass([50, 50]));
 
     let m = Neutral::witness(MachineId(1), MachineId(2), Mass([10, 0]), &f);
     assert!(m.is_some(), "Neutral with sparse mass should be admitted");

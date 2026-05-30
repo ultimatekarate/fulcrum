@@ -59,7 +59,7 @@ pub mod twin;
 pub use alphabet::{Derived, Effect, Primitive};
 pub use cluster::{turing_pi_2, NodeProfile, ResourceDim, Topology};
 pub use gauge::{Gauge, Linfty, SchurConvex, SumTopK, WeightedKyFan};
-pub use load::{Fleet, MachineId, MachineSpec, Mass};
+pub use load::{Capacity, Fleet, MachineId, MachineSpec, Mass, Utilization};
 pub use move_kind::{ColdToHot, HotToCold, Neutral, Place, Remove};
 pub use planner::{
     BestFitDecreasing, LeastLoaded, MaxMinFair, Planner, PowerOfTwo, TypedMove,

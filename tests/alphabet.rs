@@ -166,23 +166,23 @@ mod signature_match {
 
     #[test]
     fn type_level_signature_check_compiles() {
-        use fulcrum::load::{Fleet, MachineId, Mass};
+        use fulcrum::load::{Capacity, Fleet, MachineId, Mass};
 
         // Total path.
         let mut f: Fleet<1> = Fleet::new();
-        f.add_machine(MachineId(1), [100], [50]);
+        f.add_machine(MachineId(1), Capacity([100]), Mass([50]));
         let safe: Safe<fulcrum::Linfty<1>, 1> = Safe::new(f, 0.9).unwrap();
         let _ = assert_total(Remove::new(MachineId(1), Mass([10])), safe);
 
         // Fallible path.
         let mut f: Fleet<1> = Fleet::new();
-        f.add_machine(MachineId(1), [100], [50]);
+        f.add_machine(MachineId(1), Capacity([100]), Mass([50]));
         let safe: Safe<fulcrum::Linfty<1>, 1> = Safe::new(f, 0.9).unwrap();
         let _ = assert_fallible(Place::new(MachineId(1), Mass([10])), safe);
 
         // Multi-dim variant — same trait bounds, just different N.
         let mut f2: Fleet<2> = Fleet::new();
-        f2.add_machine(MachineId(1), [100, 100], [50, 30]);
+        f2.add_machine(MachineId(1), Capacity([100, 100]), Mass([50, 30]));
         let safe2: Safe<fulcrum::Linfty<2>, 2> = Safe::new(f2, 0.9).unwrap();
         let _ = assert_total(Remove::new(MachineId(1), Mass([5, 5])), safe2);
     }

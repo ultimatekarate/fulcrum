@@ -5,12 +5,12 @@
 //! and removals stays within the gauge bound, and the type system carries the
 //! claim through without runtime re-evaluation at each step.
 
-use fulcrum::{Fleet, HotToCold, Linfty, MachineId, Mass, Remove, Safe, SumTopK};
+use fulcrum::{Capacity, Fleet, HotToCold, Linfty, MachineId, Mass, Remove, Safe, SumTopK};
 
 fn fleet(loads: &[(u64, u64)], capacity: u64) -> Fleet<1> {
     let mut f = Fleet::new();
     for &(id, load) in loads {
-        f.add_machine(MachineId(id), [capacity], [load]);
+        f.add_machine(MachineId(id), Capacity([capacity]), Mass([load]));
     }
     f
 }

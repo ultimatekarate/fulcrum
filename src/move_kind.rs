@@ -22,7 +22,56 @@
 //! Robin-Hood in another falls through to the catch-all path.
 
 use crate::alphabet::{Effect, Primitive, Sealed};
-use crate::load::{Fleet, MachineId, Mass};
+use crate::load::{Fleet, MachineId, MachineSpec, Mass};
+
+/// Is moving `mass` from `src` to `dst` a Pigou-Dalton step on the
+/// **utilization** carrier, in every dimension where mass is non-zero?
+///
+/// The move alphabet conserves *load* (`Mass`), but the gauge is
+/// Schur-convex over *utilization* (= load ÷ capacity). Those two carriers
+/// coincide only when capacities match; on heterogeneous hardware they
+/// differ, and this predicate is the exact-integer reconciliation between
+/// them — we physically move load, but must certify the effect in the
+/// space the gauge actually orders. It is intentionally integer-only (no
+/// `f64`), so the comparison is exact.
+fn pigou_dalton_on_utilization<const N: usize>(
+    src: &MachineSpec<N>,
+    dst: &MachineSpec<N>,
+    mass: &Mass<N>,
+) -> bool {
+    for d in 0..N {
+        if mass.0[d] == 0 {
+            continue;
+        }
+        if src.capacity.0[d] == 0 || dst.capacity.0[d] == 0 {
+            return false;
+        }
+        // cap(src)[d] ≤ cap(dst)[d] is *precisely* the condition under which
+        // a load-conserving transfer does not increase total utilization
+        // (Σu): the same load weighs less on a larger node, so a bigger
+        // destination keeps Σu non-increasing, while a smaller one would
+        // inflate it — and no Σu-increasing step can lower a Schur-convex
+        // gauge. This is the seam where an elastic (utilization-conserving)
+        // carrier would instead admit the move.
+        if src.capacity.0[d] > dst.capacity.0[d] {
+            return false;
+        }
+        // util(src)[d] > util(dst)[d], cross-multiplied to stay exact.
+        let load_src_x_cap_dst = src.load.0[d] as u128 * dst.capacity.0[d] as u128;
+        let load_dst_x_cap_src = dst.load.0[d] as u128 * src.capacity.0[d] as u128;
+        if load_src_x_cap_dst <= load_dst_x_cap_src {
+            return false;
+        }
+        // mass[d]·cap(src)[d] ≤ gap: the transfer must not overshoot and
+        // invert the utilization order (anti-Robin-Hood).
+        let gap = load_src_x_cap_dst - load_dst_x_cap_src;
+        let mass_x_cap_src = mass.0[d] as u128 * src.capacity.0[d] as u128;
+        if mass_x_cap_src > gap {
+            return false;
+        }
+    }
+    true
+}
 
 /// Mass removal from a single machine. Mass-decreasing on every dimension
 /// — strictly reduces any monotone Schur-convex gauge on non-negative
@@ -99,28 +148,12 @@ impl<const N: usize> HotToCold<N> {
         }
         let src_spec = fleet.spec(source)?;
         let dst_spec = fleet.spec(destination)?;
-        for d in 0..N {
-            if mass.0[d] == 0 {
-                continue;
-            }
-            if src_spec.capacity[d] == 0 || dst_spec.capacity[d] == 0 {
-                return None;
-            }
-            if src_spec.capacity[d] > dst_spec.capacity[d] {
-                return None;
-            }
-            // util(src)[d] > util(dst)[d] in integer cross-product form.
-            let load_src_x_cap_dst = src_spec.load[d] as u128 * dst_spec.capacity[d] as u128;
-            let load_dst_x_cap_src = dst_spec.load[d] as u128 * src_spec.capacity[d] as u128;
-            if load_src_x_cap_dst <= load_dst_x_cap_src {
-                return None;
-            }
-            // mass[d]·cap(src)[d] ≤ load(src)[d]·cap(dst)[d] − load(dst)[d]·cap(src)[d].
-            let gap = load_src_x_cap_dst - load_dst_x_cap_src;
-            let mass_x_cap_src = mass.0[d] as u128 * src_spec.capacity[d] as u128;
-            if mass_x_cap_src > gap {
-                return None;
-            }
+        // The witness body now reads as the one question that defines this
+        // move kind: is moving `mass` a Pigou-Dalton step on the gauged
+        // (utilization) carrier? The exact-integer arithmetic lives in the
+        // named predicate.
+        if !pigou_dalton_on_utilization(src_spec, dst_spec, &mass) {
+            return None;
         }
         Some(HotToCold {
             source,

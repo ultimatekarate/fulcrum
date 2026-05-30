@@ -174,13 +174,13 @@ impl<const N: usize> Place<N> {
 mod tests {
     use super::*;
     use crate::gauge::{Linfty, WeightedKyFan};
-    use crate::load::{Fleet, MachineId, Mass};
+    use crate::load::{Capacity, Fleet, MachineId, Mass};
 
     fn fleet_3x100_loads(a: u64, b: u64, c: u64) -> Fleet<1> {
         let mut f = Fleet::new();
-        f.add_machine(MachineId(1), [100], [a]);
-        f.add_machine(MachineId(2), [100], [b]);
-        f.add_machine(MachineId(3), [100], [c]);
+        f.add_machine(MachineId(1), Capacity([100]), Mass([a]));
+        f.add_machine(MachineId(2), Capacity([100]), Mass([b]));
+        f.add_machine(MachineId(3), Capacity([100]), Mass([c]));
         f
     }
 

@@ -9,7 +9,7 @@
 //! slots are an unrelated coincidence. A 6-node cluster of 4-dimension
 //! nodes would still be `Fleet<4>`.
 
-use crate::load::{Fleet, MachineId};
+use crate::load::{Capacity, Fleet, MachineId, Mass};
 use crate::power::{Power, PowerCoeffs};
 
 /// The four balancing dimensions each node carries, mapped to the load /
@@ -40,12 +40,12 @@ impl ResourceDim {
 
 /// A node's static profile: per-dimension capacity and power coefficients.
 ///
-/// `capacity` is left raw `[u64; 4]` for this milestone — `basis.yaml`'s
-/// `exclude_params` currently sanctions it (governance refactor B would
-/// brand it `Capacity<N>`; deferred).
+/// `capacity` is branded `Capacity<N>` — it cannot be swapped with a load
+/// (`Mass`) vector at any API boundary, even though both are `[u64; N]`
+/// underneath.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NodeProfile {
-    pub capacity: [u64; ResourceDim::COUNT],
+    pub capacity: Capacity<{ ResourceDim::COUNT }>,
     pub power: PowerCoeffs,
 }
 
@@ -62,7 +62,7 @@ impl Topology {
     pub fn fleet(&self) -> Fleet<4> {
         let mut f = Fleet::new();
         for (id, profile) in &self.nodes {
-            f.add_machine(*id, profile.capacity, [0; ResourceDim::COUNT]);
+            f.add_machine(*id, profile.capacity, Mass([0; ResourceDim::COUNT]));
         }
         f
     }
@@ -93,7 +93,7 @@ impl Topology {
 fn raspberry_pi_5_8gb() -> NodeProfile {
     NodeProfile {
         // [Cpu, Mem(MiB), DiskIo, NetIo]
-        capacity: [1000, 8192, 1000, 1000],
+        capacity: Capacity([1000, 8192, 1000, 1000]),
         power: PowerCoeffs {
             idle: Power(2700.0),
             dynamic: Power(7300.0), // idle + dynamic = 10_000 mW at full load
@@ -106,7 +106,7 @@ fn raspberry_pi_5_8gb() -> NodeProfile {
 /// (≈ 2.7 W idle, ≈ 6.5 W all-core).
 fn raspberry_pi_4_4gb() -> NodeProfile {
     NodeProfile {
-        capacity: [600, 4096, 200, 1000],
+        capacity: Capacity([600, 4096, 200, 1000]),
         power: PowerCoeffs {
             idle: Power(2700.0),
             dynamic: Power(3800.0), // idle + dynamic = 6_500 mW at full load
