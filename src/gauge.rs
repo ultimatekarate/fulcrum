@@ -89,21 +89,9 @@ pub struct SumTopK<const K: usize, const N: usize>;
 
 impl<const K: usize, const N: usize> sealed::Sealed for SumTopK<K, N> {}
 
-impl<const K: usize, const N: usize> Gauge<N> for SumTopK<K, N> {
-    fn eval(&self, fleet: &Fleet<N>) -> f64 {
-        if fleet.is_empty() || K == 0 {
-            return 0.0;
-        }
-        let mut utils: Vec<f64> = fleet.iter().map(|(_, spec)| spec.worst_utilization()).collect();
-        utils.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-        utils.iter().take(K).sum()
-    }
-
-    fn name(&self) -> &'static str {
-        "SumTopK"
-    }
-}
-
+// `impl Gauge<N> for SumTopK` (the `eval` body) lives in the laboratory
+// layer: see `src/gauge_eval.rs`. The marker `SchurConvex` membership stays
+// here beside the type, alongside `Sealed`.
 impl<const K: usize, const N: usize> SchurConvex<N> for SumTopK<K, N> {}
 
 /// ℓ_∞ gauge: max-machine, max-dimension utilization.
@@ -155,31 +143,8 @@ impl<const K: usize, const N: usize> WeightedKyFan<K, N> {
 
 impl<const K: usize, const N: usize> sealed::Sealed for WeightedKyFan<K, N> {}
 
-impl<const K: usize, const N: usize> Gauge<N> for WeightedKyFan<K, N> {
-    fn eval(&self, fleet: &Fleet<N>) -> f64 {
-        if fleet.is_empty() || K == 0 {
-            return 0.0;
-        }
-        let mut utils: Vec<f64> = fleet.iter().map(|(_, spec)| spec.worst_utilization()).collect();
-        utils.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-
-        // Σ_{k=1}^{K} weights[k-1] · (sum of top-k worst-dim utilizations)
-        let mut total = 0.0_f64;
-        let mut cumulative = 0.0_f64;
-        for (k, w) in self.weights.iter().enumerate() {
-            if k < utils.len() {
-                cumulative += utils[k];
-            }
-            total += w * cumulative;
-        }
-        total
-    }
-
-    fn name(&self) -> &'static str {
-        "WeightedKyFan"
-    }
-}
-
+// `impl Gauge<N> for WeightedKyFan` (the `eval` body) lives in the
+// laboratory layer: see `src/gauge_eval.rs`.
 impl<const K: usize, const N: usize> SchurConvex<N> for WeightedKyFan<K, N> {}
 
 #[cfg(test)]
