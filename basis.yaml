@@ -9,30 +9,38 @@ governance:
 #
 #   laboratory: pure logic — gauge evaluation, witness construction, apply
 #               impls, the typestate `Safe<G, N>`. May import dictionary.
+#               (Gauge *declarations* stay in dictionary; gauge *eval* —
+#               `gauge_eval.rs` — and power eval — `power_eval.rs` — live
+#               here.)
 #
 #   planners:   reference scheduler implementations. Strictly above
 #               laboratory; consumes the move alphabet and Safe<G, N>.
 #               Pure (no IO); randomness must be deterministically seeded.
 #
-#   hands:      IO-touching code. CSV parsing, replay support. May import
-#               anywhere. The only layer permitted to do file_io.
+#   hands:      IO-touching code. CSV parsing, replay support, the cluster
+#               twin. May import anywhere (including planners — the twin
+#               drives them). The only layer permitted to do file_io.
 
 layers:
   dictionary:
     role: "Data types, gauges, alphabet declarations"
     packages:
       - "src/alphabet.rs"
+      - "src/cluster.rs"
       - "src/gauge.rs"
       - "src/load.rs"
+      - "src/power.rs"
       - "src/trace.rs"
     rules:
       purity: strict
     depends_on: []
 
   laboratory:
-    role: "Algebraic move kinds, typestate, apply impls"
+    role: "Algebraic move kinds, typestate, gauge/power evaluation, apply impls"
     packages:
+      - "src/gauge_eval.rs"
       - "src/move_kind.rs"
+      - "src/power_eval.rs"
       - "src/safe.rs"
     rules:
       purity: strict
@@ -51,10 +59,11 @@ layers:
     depends_on: [dictionary, laboratory]
 
   hands:
-    role: "IO, parsing, replay support"
+    role: "IO, parsing, replay support, the cluster twin"
     packages:
       - "src/replay.rs"
-    depends_on: [dictionary, laboratory]
+      - "src/twin.rs"
+    depends_on: [dictionary, laboratory, planners]
 
 # Branded newtypes that must not be replaced with raw integers at API
 # boundaries. The point: a function that takes `u64` could mean anything;
@@ -69,10 +78,16 @@ newtypes:
       const_generic: N
     - name: MachineId
       wraps: u64
+    - name: Power
+      wraps: f64
 
-# Discriminated unions that must be matched exhaustively. Adding a new
-# variant to any of these without updating every match site is a build
-# failure under basis.
+# Discriminated unions that must be matched exhaustively. Rust `match` is
+# already exhaustive unless a `_` wildcard arm absorbs new variants, so the
+# operative effect of this rule is: **no `_` wildcard arms** on the listed
+# unions — every match site must name each variant, so adding a variant is a
+# compile error until every site is updated. (The variant lists below
+# duplicate the Rust source and can drift; a future improvement is to derive
+# them from source rather than restate them here.)
 exhaustive_matching:
   enabled: true
   unions:
