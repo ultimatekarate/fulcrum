@@ -27,7 +27,7 @@
 use crate::cluster::turing_pi_2;
 use crate::gauge::{Linfty, SchurConvex};
 use crate::load::{Fleet, MachineId, Mass};
-use crate::planner::{LeastLoaded, MaxMinFair, Planner, TypedMove};
+use crate::planner::{evaluate_pair, LeastLoaded, MaxMinFair, PairVerdict, Planner, TypedMove};
 use crate::power::{Power, PowerBudget};
 use crate::power_eval::fleet_power;
 use crate::safe::{GaugeError, Safe};
@@ -331,6 +331,92 @@ pub fn run_turing_pi_2_twin(config: TwinConfig) -> Result<TwinReport, GaugeError
         final_gauge: sim.safe().gauge(),
         final_power: sim.power(),
         typed_pure_ratio: sim.history().typed_pure_ratio(),
+    })
+}
+
+/// The result of the rebalance-stall experiment: does `MaxMinFair` stop
+/// because the fleet is *balanced*, or because the capacity guard *blocks* it
+/// while imbalance remains — and on which dimension?
+///
+/// This is the falsifiable core of the elastic-carrier hypothesis. If Phase B
+/// halts via `BelowEpsilon`, the carrier work is right-but-immaterial. If it
+/// halts via `GuardBlocked` with `Emit`-able pairs left in `halt_scan`, then
+/// typed-pure rebalancing is being suppressed — and the binding dimension of
+/// those stalls says whether an *elastic* carrier (the guard is spurious on
+/// elastic dims) or merely *more planner coverage* (try another pair) is the
+/// right fix.
+#[derive(Clone, Debug)]
+pub struct RebalanceStallReport {
+    /// `MaxMinFair`'s per-`step` verdicts over the real Phase-B run. Leading
+    /// entries are the emitted migrations; the final entry is the halt reason.
+    pub phase_b_log: Vec<PairVerdict>,
+    /// Count of typed-pure `HotToCold` migrations Phase B actually applied.
+    pub migrations_applied: usize,
+    /// Every ordered `(src, dst)` pair evaluated against the **halted** fleet —
+    /// the counterfactual "what else was available when the planner gave up".
+    pub halt_scan: Vec<(MachineId, MachineId, PairVerdict)>,
+    /// Load gauge after Phase B halted.
+    pub halted_gauge: f64,
+    /// Per-node `(id, worst-util)` at the halt, ascending id.
+    pub halted_per_node: Vec<(MachineId, f64)>,
+}
+
+/// Run the Turing Pi 2 twin's two phases, then interrogate *why* the
+/// `MaxMinFair` rebalance pass stopped. Phase A (placement) is byte-identical
+/// to [`run_turing_pi_2_twin`]; Phase B uses an instrumented `MaxMinFair`
+/// whose per-pair verdicts are logged (the log never feeds back into policy,
+/// so behavior is unchanged). After the halt, every ordered machine pair is
+/// re-evaluated against the final fleet via the *same* [`evaluate_pair`] the
+/// planner uses — so the counterfactual cannot drift from the policy.
+pub fn diagnose_turing_pi_2_rebalance(
+    config: TwinConfig,
+) -> Result<RebalanceStallReport, GaugeError> {
+    let topo = turing_pi_2();
+    let fleet: Fleet<4> = topo.fleet();
+    let coeffs = topo.coeffs();
+    let safe: Safe<Linfty<4>, 4> = Safe::new(fleet, config.threshold)?;
+
+    let mut gen = WorkloadGen::new(config.seed, config.max_mass);
+    let items = gen.take(config.n_workloads);
+
+    let mut sim = Sim::new(safe, coeffs, config.budget);
+
+    // Phase A: placement (identical to the reference twin).
+    let mut placer = LeastLoaded::new(items);
+    sim.drive(&mut placer);
+
+    // Phase B: instrumented rebalance.
+    let mut rebalancer = MaxMinFair::new(config.rebalance_epsilon);
+    sim.drive(&mut rebalancer);
+
+    let phase_b_log: Vec<PairVerdict> = rebalancer.log().to_vec();
+    let migrations_applied = phase_b_log.iter().filter(|v| v.is_emit()).count();
+
+    // Counterfactual: re-evaluate every ordered pair against the halted fleet.
+    let halted = sim.safe().fleet();
+    let ids: Vec<MachineId> = halted.iter().map(|(id, _)| id).collect();
+    let mut halt_scan = Vec::new();
+    for &src in &ids {
+        for &dst in &ids {
+            if src == dst {
+                continue;
+            }
+            let verdict = evaluate_pair(halted, src, dst, config.rebalance_epsilon);
+            halt_scan.push((src, dst, verdict));
+        }
+    }
+    let halted_per_node: Vec<(MachineId, f64)> = halted
+        .iter()
+        .map(|(id, spec)| (id, spec.worst_utilization()))
+        .collect();
+    let halted_gauge = sim.safe().gauge();
+
+    Ok(RebalanceStallReport {
+        phase_b_log,
+        migrations_applied,
+        halt_scan,
+        halted_gauge,
+        halted_per_node,
     })
 }
 
