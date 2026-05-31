@@ -26,11 +26,12 @@
 
 use crate::cluster::turing_pi_2;
 use crate::gauge::{Linfty, SchurConvex};
-use crate::load::{Fleet, MachineId, MachineSpec, Mass};
+use crate::load::{Capacity, Fleet, MachineId, MachineSpec, Mass};
+use crate::move_kind::Remove;
 use crate::planner::{
     evaluate_pair, LeastLoaded, MaxMinFair, MaxMinFairGreedy, PairVerdict, Planner, TypedMove,
 };
-use crate::power::{Power, PowerBudget};
+use crate::power::{Power, PowerBudget, PowerCoeffs};
 use crate::power_eval::fleet_power;
 use crate::safe::{GaugeError, Safe};
 use crate::trace::{MoveHistory, MoveRecord};
@@ -132,6 +133,12 @@ pub struct Sim<G: SchurConvex<4>> {
     history: MoveHistory<4>,
     timeline: Vec<TimelineRow>,
     stats: SimStats,
+    /// When false, applied moves are not appended to `history`/`timeline` (only
+    /// `stats` advance). Default true. Large-fleet, high-move-count drivers (the
+    /// churn benchmark) turn it off: a per-move timeline row is O(machines), so
+    /// recording tens of thousands of moves over a 256-node fleet is a needless
+    /// O(moves · machines) memory blow-up when only the counters are wanted.
+    record_enabled: bool,
 }
 
 impl<G: SchurConvex<4>> Sim<G> {
@@ -145,7 +152,14 @@ impl<G: SchurConvex<4>> Sim<G> {
             history: MoveHistory::new(),
             timeline: Vec::new(),
             stats: SimStats::default(),
+            record_enabled: true,
         }
+    }
+
+    /// Toggle per-move history/timeline recording. Off ⇒ only `stats` advance
+    /// (used by the churn benchmark, which reads counters, not the timeline).
+    pub fn set_recording(&mut self, on: bool) {
+        self.record_enabled = on;
     }
 
     /// Run a planner to exhaustion, applying every move it emits.
@@ -183,7 +197,13 @@ impl<G: SchurConvex<4>> Sim<G> {
                                 .apply_with_recheck(safe)
                                 .expect("prechecked: within gauge and budget");
                             self.stats.placed += 1;
-                            self.record(&s, "Place", MoveRecord::Place { machine: p.machine, mass: p.mass });
+                            if self.record_enabled {
+                                self.record(
+                                    &s,
+                                    "Place",
+                                    MoveRecord::Place { machine: p.machine, mass: p.mass },
+                                );
+                            }
                             s
                         }
                     }
@@ -205,7 +225,9 @@ impl<G: SchurConvex<4>> Sim<G> {
                     .apply(safe)
                     .expect("twin driver: non-Place move must be typed-pure");
                 self.stats.typed_pure_applied += 1;
-                self.record(&s, kind, record);
+                if self.record_enabled {
+                    self.record(&s, kind, record);
+                }
                 s
             }
         };
@@ -580,6 +602,179 @@ pub fn greedy_outcome(config: TwinConfig) -> Result<GreedyOutcome, GaugeError> {
         gauge,
         threshold: config.threshold,
         residual_guard_blocked,
+    })
+}
+
+/// A one-shot planner that emits a single `Remove` (a workload departing), then
+/// halts. Lets the churn driver inject a typed-pure removal through the same
+/// `Sim` apply/accounting path the reference planners use.
+struct RemoveOnce {
+    mv: Option<(MachineId, Mass<4>)>,
+}
+
+impl<G: SchurConvex<4>> Planner<4, G> for RemoveOnce {
+    fn step(&mut self, _safe: &Safe<G, 4>) -> Option<TypedMove<4>> {
+        self.mv.take().map(|(m, mass)| TypedMove::Remove(Remove::new(m, mass)))
+    }
+}
+
+/// Draw a per-dimension demand uniformly from `0..=max_mass[d]`.
+fn draw_mass(rng: &mut Xorshift64, max_mass: &[u64; 4]) -> Mass<4> {
+    let mut m = [0u64; 4];
+    for d in 0..4 {
+        m[d] = rng.next() % (max_mass[d] + 1);
+    }
+    Mass(m)
+}
+
+/// Pick a random non-empty machine and a per-dimension removal capped at its
+/// current load (a job finishing). Returns `None` if the fleet is empty or the
+/// draw is all-zero. The cap guarantees the typed-pure `Remove` never
+/// underflows.
+fn pick_departure(
+    fleet: &Fleet<4>,
+    rng: &mut Xorshift64,
+    max_mass: &[u64; 4],
+) -> Option<(MachineId, Mass<4>)> {
+    let m = fleet.len();
+    if m == 0 {
+        return None;
+    }
+    let start = (rng.next() % m as u64) as usize;
+    for off in 0..m {
+        let id = MachineId(((start + off) % m) as u64 + 1);
+        if let Some(load) = fleet.load(id) {
+            if load.0.iter().any(|&x| x > 0) {
+                let draw = draw_mass(rng, max_mass);
+                let mut rm = [0u64; 4];
+                for d in 0..4 {
+                    rm[d] = draw.0[d].min(load.0[d]);
+                }
+                if rm.iter().any(|&x| x > 0) {
+                    return Some((id, Mass(rm)));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Configuration for the steady-state churn benchmark (benchmark #2): a
+/// populated fleet under continuous arrival/departure, measuring how the
+/// typed-pure ratio `p` responds as the workload shifts from cold-start
+/// (placement-only) toward steady-state churn (departures + active rebalance).
+#[derive(Clone, Copy, Debug)]
+pub struct ChurnConfig {
+    pub seed: u64,
+    /// Fleet size M (synthetic uniform-capacity machines, ids `1..=M`).
+    pub machines: usize,
+    /// Uniform per-dimension capacity.
+    pub capacity: u64,
+    /// Cold-start placements used to populate the fleet (excluded from the
+    /// measured steady-state window).
+    pub fill: usize,
+    /// Steady-state ticks to measure over.
+    pub ticks: usize,
+    /// Probability a tick is a departure (typed-pure `Remove`) rather than an
+    /// arrival (catch-all `Place`). 0.5 ≈ steady state (mass neither grows nor
+    /// shrinks); 0.0 ≈ cold-start (arrivals only).
+    pub departure_prob: f64,
+    /// Per-dimension max demand for a single workload.
+    pub max_mass: [u64; 4],
+    /// Load-gauge threshold τ.
+    pub threshold: f64,
+    /// Convergence epsilon for the rebalance pass.
+    pub rebalance_epsilon: f64,
+    /// Whether to rebalance to convergence (`MaxMinFairGreedy`) after each tick.
+    pub rebalance_each_tick: bool,
+}
+
+/// Outcome of a steady-state churn run, measured over the steady-state window
+/// only (the cold-start fill is excluded). The headline is
+/// [`Self::typed_pure_ratio`] — the `p` that benchmark #1's realized speedup
+/// `B/(p·A + (1−p)·B)` is gated by — decomposed into removals (jobs finishing)
+/// vs migrations (active rebalancing), so the *source* of the lift is legible.
+#[derive(Clone, Copy, Debug)]
+pub struct ChurnReport {
+    /// Applied `Place` moves (catch-all; the only rechecked kind).
+    pub placements: u64,
+    /// Arrivals rejected by the τ recheck (admission pressure).
+    pub place_rejected: u64,
+    /// Applied `Remove` moves (typed-pure; departures).
+    pub removals: u64,
+    /// Applied `HotToCold` moves (typed-pure; rebalancing).
+    pub migrations: u64,
+    /// `(removals + migrations) / (removals + migrations + placements)`.
+    pub typed_pure_ratio: f64,
+    /// Load gauge at the end of the run.
+    pub final_gauge: f64,
+}
+
+/// Run a steady-state churn simulation and report the typed-pure ratio over the
+/// steady-state window. Populates an M-machine fleet, then alternates arrivals
+/// (`Place`) and departures (`Remove`) under `departure_prob`, optionally
+/// rebalancing to convergence each tick. The cold-start fill is excluded from
+/// the measured window, so the ratio reflects *operating* mix — not the one-time
+/// bulk placement that pins the cold-start twin at 0.12.
+///
+/// Power is inert here (the churn question is move-mix, not energy): coeffs are
+/// zero and the budget is infinite, so only the load gauge gates placements.
+pub fn steady_state_churn(config: ChurnConfig) -> Result<ChurnReport, GaugeError> {
+    let mut fleet: Fleet<4> = Fleet::new();
+    for i in 0..config.machines {
+        fleet.add_machine(MachineId(i as u64 + 1), Capacity([config.capacity; 4]), Mass([0; 4]));
+    }
+    let coeffs = vec![PowerCoeffs { idle: Power(0.0), dynamic: Power(0.0) }; config.machines];
+    let safe: Safe<Linfty<4>, 4> = Safe::new(fleet, config.threshold)?;
+    let mut sim = Sim::new(safe, coeffs, PowerBudget(Power(f64::INFINITY)));
+    // Counters only — a per-move timeline row over a 256-node fleet × tens of
+    // thousands of moves would be gigabytes for data we never read here.
+    sim.set_recording(false);
+
+    let mut rng = Xorshift64::new(config.seed);
+
+    // Cold-start fill (excluded from the measured window).
+    let fill_items: Vec<Mass<4>> =
+        (0..config.fill).map(|_| draw_mass(&mut rng, &config.max_mass)).collect();
+    sim.drive(&mut LeastLoaded::new(fill_items));
+    if config.rebalance_each_tick {
+        sim.drive(&mut MaxMinFairGreedy::new(config.rebalance_epsilon));
+    }
+    let s0 = sim.stats();
+
+    let mut removals: u64 = 0;
+    for _ in 0..config.ticks {
+        let coin = (rng.next() % 1_000_000) as f64 / 1_000_000.0;
+        if coin < config.departure_prob {
+            if let Some((id, mass)) = pick_departure(sim.safe().fleet(), &mut rng, &config.max_mass) {
+                sim.drive(&mut RemoveOnce { mv: Some((id, mass)) });
+                removals += 1;
+            }
+        } else {
+            let demand = draw_mass(&mut rng, &config.max_mass);
+            sim.drive(&mut LeastLoaded::new(vec![demand]));
+        }
+        if config.rebalance_each_tick {
+            sim.drive(&mut MaxMinFairGreedy::new(config.rebalance_epsilon));
+        }
+    }
+    let s1 = sim.stats();
+
+    let placements = s1.placed - s0.placed;
+    let typed_pure = s1.typed_pure_applied - s0.typed_pure_applied;
+    let migrations = typed_pure.saturating_sub(removals);
+    let place_rejected = (s1.load_rejected - s0.load_rejected)
+        + (s1.power_rejected - s0.power_rejected)
+        + (s1.malformed - s0.malformed);
+
+    let denom = (typed_pure + placements).max(1);
+    Ok(ChurnReport {
+        placements,
+        place_rejected,
+        removals,
+        migrations,
+        typed_pure_ratio: typed_pure as f64 / denom as f64,
+        final_gauge: sim.safe().gauge(),
     })
 }
 

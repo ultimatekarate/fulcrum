@@ -71,6 +71,7 @@ pub use safe::{GaugeError, Safe};
 pub use trace::{MoveHistory, MoveRecord};
 pub use twin::{
     compare_rebalancers, diagnose_turing_pi_2_rebalance, greedy_outcome, run_turing_pi_2_twin,
-    timeline_to_csv, GreedyOutcome, RebalanceComparison, RebalanceStallReport, Sim, SimStats,
-    TimelineRow, TwinConfig, TwinReport, WorkloadGen,
+    steady_state_churn, timeline_to_csv, ChurnConfig, ChurnReport, GreedyOutcome,
+    RebalanceComparison, RebalanceStallReport, Sim, SimStats, TimelineRow, TwinConfig, TwinReport,
+    WorkloadGen,
 };

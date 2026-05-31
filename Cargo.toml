@@ -26,6 +26,10 @@ path = "examples/cluster_twin.rs"
 name = "bench_typed_pure"
 path = "examples/bench_typed_pure.rs"
 
+[[example]]
+name = "bench_rebalance_ratio"
+path = "examples/bench_rebalance_ratio.rs"
+
 [dependencies]
 csv = "1.3"
 
