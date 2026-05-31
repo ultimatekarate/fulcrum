@@ -30,6 +30,10 @@ path = "examples/bench_typed_pure.rs"
 name = "bench_rebalance_ratio"
 path = "examples/bench_rebalance_ratio.rs"
 
+[[example]]
+name = "bench_defensive"
+path = "examples/bench_defensive.rs"
+
 [dependencies]
 csv = "1.3"
 
