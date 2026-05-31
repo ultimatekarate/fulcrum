@@ -7,8 +7,8 @@
 //! `Safe` typestate — the twin rechecks the budget at `Place` apply time as
 //! a runtime convention (plan decision #2).
 
-use crate::load::Fleet;
-use crate::power::{Power, PowerCoeffs};
+use fulcrum_dictionary::load::Fleet;
+use fulcrum_dictionary::power::{Power, PowerCoeffs};
 
 /// Fixed convexity exponent. Only convexity (any exponent > 1) is
 /// load-bearing — it is what makes fleet power Schur-convex, so a

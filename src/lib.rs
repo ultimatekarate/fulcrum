@@ -15,45 +15,33 @@
 //! operations, where the runtime check is unavoidable and visible at
 //! every call site.
 //!
-//! ## What's in the current build
+//! ## Workspace layout
 //!
-//! - Gauge family: [`gauge::SumTopK`] (Ky Fan k-norm) over per-machine
-//!   worst-dimension utilization, [`gauge::Linfty`] (alias for
-//!   `SumTopK<1, N>`), and [`gauge::WeightedKyFan`] (non-negative linear
-//!   combinations).
-//! - Five move kinds in [`move_kind`]: `Remove`, `HotToCold`, `Neutral`,
-//!   `ColdToHot`, `Place`.
-//! - **Heterogeneous per-machine capacity** (Phase 1).
-//! - **Multi-dimensional load** (Phase 2): `Fleet<N>`, `Mass<N>`,
-//!   `Safe<G, N>`. Component-wise gauge interpretation: per-machine
-//!   utilization is reduced by `max_d`, then sorted and Ky Fan-ed across
-//!   machines. Joint multi-dim gauges are deferred.
-//! - **Reference planners** (Phase 3): [`planner::LeastLoaded`],
-//!   [`planner::PowerOfTwo`], [`planner::MaxMinFair`],
-//!   [`planner::BestFitDecreasing`]. Each implements the
-//!   [`planner::Planner`] trait, emitting a [`planner::TypedMove`] per
-//!   `step` call.
+//! Fulcrum is split into crates whose boundaries are the architecture's
+//! linguistic layers, enforced as `Cargo.toml` facts:
 //!
-//! ## Stability
+//! - [`fulcrum_dictionary`] — inert data (load, capacity, power, topology,
+//!   trace). No logic, no internal deps.
+//! - [`fulcrum_laboratory`] — pure logic: the sealed `Primitive` alphabet,
+//!   the Ky Fan gauge family and its evaluation, the move-kind witnesses,
+//!   power evaluation, and the `Safe<G, N>` typestate. Depends only on the
+//!   dictionary.
+//! - `fulcrum` (this crate) — the planners ([`planner`]) and the IO-facing
+//!   hands ([`twin`], [`replay`]), plus a flat re-export of the two lower
+//!   crates so `fulcrum::Mass`, `fulcrum::Safe`, etc. resolve unchanged.
 //!
-//! Pre-1.0. Everything is subject to change. See `PLAN.md` for v0 scope
-//! and kill criteria.
+//! The gauge declaration and its `eval` impls live *together* in the
+//! laboratory: Rust's orphan rule forbids `impl Gauge for SumTopK` from any
+//! crate owning neither, so the decl/eval separation is a module boundary,
+//! never a crate boundary.
 
-pub mod alphabet;
-pub mod cluster;
-pub mod gauge;
-// Private: holds only `impl Gauge<N> for …` eval bodies (the laboratory half
-// of the gauge decl/eval split). Trait impls are in scope crate-wide
-// regardless, so nothing needs to name this module path.
-mod gauge_eval;
-pub mod load;
-pub mod move_kind;
+// Re-export the lower crates' modules so `fulcrum::load::X`,
+// `fulcrum::gauge::Y`, `fulcrum::safe::Z`, … keep resolving.
+pub use fulcrum_dictionary::{cluster, load, power, trace};
+pub use fulcrum_laboratory::{alphabet, gauge, move_kind, power_eval, safe};
+
 pub mod planner;
-pub mod power;
-pub mod power_eval;
 pub mod replay;
-pub mod safe;
-pub mod trace;
 pub mod twin;
 
 pub use alphabet::{Derived, Effect, Primitive};

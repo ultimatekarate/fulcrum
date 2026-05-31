@@ -46,9 +46,9 @@ pub use least_loaded::LeastLoaded;
 pub use max_min_fair::{evaluate_pair, MaxMinFair, MaxMinFairGreedy, PairVerdict};
 pub use power_of_two::PowerOfTwo;
 
-use crate::gauge::SchurConvex;
-use crate::move_kind::{ColdToHot, HotToCold, Neutral, Place, Remove};
-use crate::safe::{GaugeError, Safe};
+use fulcrum_laboratory::gauge::SchurConvex;
+use fulcrum_laboratory::move_kind::{ColdToHot, HotToCold, Neutral, Place, Remove};
+use fulcrum_laboratory::safe::{GaugeError, Safe};
 
 /// A typed move emitted by a planner. Each variant wraps one of the
 /// five move kinds in the alphabet.

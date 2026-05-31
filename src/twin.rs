@@ -2,7 +2,7 @@
 //!
 //! This is the `hands` layer's second inhabitant (after `replay.rs`). It
 //! *drives* the move algebra rather than classifying a trace: it stands up
-//! a heterogeneous `Fleet<4>` from a [`crate::cluster`] topology, generates
+//! a heterogeneous `Fleet<4>` from a [`fulcrum_dictionary::cluster`] topology, generates
 //! a reproducible stream of workload demands, runs the existing reference
 //! planners, and threads `Safe<G, 4>` forward — enforcing the load gauge
 //! (the typestate's job) and the fleet-wide power budget (a runtime
@@ -24,17 +24,17 @@
 //! The workload generator is a deterministically seeded xorshift64 PRNG (no
 //! `system_clock`). Same seed ⇒ same stream ⇒ bit-identical timeline.
 
-use crate::cluster::turing_pi_2;
-use crate::gauge::{Linfty, SchurConvex};
-use crate::load::{Capacity, Fleet, MachineId, MachineSpec, Mass};
-use crate::move_kind::Remove;
+use fulcrum_dictionary::cluster::turing_pi_2;
+use fulcrum_laboratory::gauge::{Linfty, SchurConvex};
+use fulcrum_dictionary::load::{Capacity, Fleet, MachineId, MachineSpec, Mass};
+use fulcrum_laboratory::move_kind::Remove;
 use crate::planner::{
     evaluate_pair, LeastLoaded, MaxMinFair, MaxMinFairGreedy, PairVerdict, Planner, TypedMove,
 };
-use crate::power::{Power, PowerBudget, PowerCoeffs};
-use crate::power_eval::fleet_power;
-use crate::safe::{GaugeError, Safe};
-use crate::trace::{MoveHistory, MoveRecord};
+use fulcrum_dictionary::power::{Power, PowerBudget, PowerCoeffs};
+use fulcrum_laboratory::power_eval::fleet_power;
+use fulcrum_laboratory::safe::{GaugeError, Safe};
+use fulcrum_dictionary::trace::{MoveHistory, MoveRecord};
 
 /// Inline xorshift64 PRNG — same approach as `planner::power_of_two`.
 /// Deterministic; not cryptographic.
@@ -128,7 +128,7 @@ pub struct TimelineRow {
 /// the budget, and the accumulated history / timeline / stats.
 pub struct Sim<G: SchurConvex<4>> {
     safe: Option<Safe<G, 4>>,
-    coeffs: Vec<crate::power::PowerCoeffs>,
+    coeffs: Vec<fulcrum_dictionary::power::PowerCoeffs>,
     budget: PowerBudget,
     history: MoveHistory<4>,
     timeline: Vec<TimelineRow>,
@@ -144,7 +144,7 @@ pub struct Sim<G: SchurConvex<4>> {
 impl<G: SchurConvex<4>> Sim<G> {
     /// Start a simulation from an initial safe state, per-node coefficients
     /// (parallel to `safe.fleet().iter()`), and a power budget.
-    pub fn new(safe: Safe<G, 4>, coeffs: Vec<crate::power::PowerCoeffs>, budget: PowerBudget) -> Self {
+    pub fn new(safe: Safe<G, 4>, coeffs: Vec<fulcrum_dictionary::power::PowerCoeffs>, budget: PowerBudget) -> Self {
         Self {
             safe: Some(safe),
             coeffs,
@@ -559,7 +559,7 @@ pub struct GreedyOutcome {
     /// Post-greedy per-machine specs, ascending id (parallel to `coeffs`).
     pub specs: Vec<(MachineId, MachineSpec<4>)>,
     /// Per-node power coefficients, parallel to `specs`.
-    pub coeffs: Vec<crate::power::PowerCoeffs>,
+    pub coeffs: Vec<fulcrum_dictionary::power::PowerCoeffs>,
     /// Load gauge (worst-machine worst-dim utilization) at the stuck state.
     pub gauge: f64,
     /// The `Safe` threshold τ — the only hard bound the residue must respect.
@@ -797,7 +797,7 @@ pub fn timeline_to_csv(rows: &[TimelineRow]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::power::{Power, PowerBudget};
+    use fulcrum_dictionary::power::{Power, PowerBudget};
 
     fn config() -> TwinConfig {
         TwinConfig {

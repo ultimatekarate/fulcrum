@@ -22,7 +22,7 @@
 //! Robin-Hood in another falls through to the catch-all path.
 
 use crate::alphabet::{Effect, Primitive, Sealed};
-use crate::load::{Fleet, MachineId, MachineSpec, Mass};
+use fulcrum_dictionary::load::{Fleet, MachineId, MachineSpec, Mass};
 
 /// Is moving `mass` from `src` to `dst` a Pigou-Dalton step on the
 /// **utilization** carrier, in every dimension where mass is non-zero?

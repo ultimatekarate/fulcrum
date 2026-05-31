@@ -1,0 +1,14 @@
+[package]
+name = "fulcrum-laboratory"
+version = "0.0.1"
+edition = "2021"
+description = "Fulcrum laboratory: pure logic — gauges, move-kind witnesses, apply impls, the Safe typestate."
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "fulcrum_laboratory"
+path = "src/lib.rs"
+
+[dependencies]
+fulcrum-dictionary = { path = "../fulcrum-dictionary" }

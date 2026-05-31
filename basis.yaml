@@ -1,47 +1,57 @@
 governance:
   version: "1.0"
 
-# Fulcrum's internal layering. Four layers, ordered by what may import what:
+# Fulcrum's internal layering. Four linguistic layers, ordered by what may
+# import what — and now enforced as Cargo crate boundaries, not module
+# convention. A layer cannot import an upper layer because the crate does
+# not depend on it; that is a Cargo.toml fact the compiler checks.
 #
-#   dictionary: pure data types, gauge declarations, the sealed Primitive
-#               trait. The smallest possible foundation. May import nothing
-#               from inside fulcrum (depends on std types only).
+#   dictionary (crate fulcrum-dictionary): pure data types — the nouns. The
+#               smallest possible foundation. Depends on std only; cannot
+#               import any other fulcrum crate.
 #
-#   laboratory: pure logic — gauge evaluation, witness construction, apply
-#               impls, the typestate `Safe<G, N>`. May import dictionary.
-#               (Gauge *declarations* stay in dictionary; gauge *eval* —
-#               `gauge_eval.rs` — and power eval — `power_eval.rs` — live
-#               here.)
+#   laboratory (crate fulcrum-laboratory): pure logic — the sealed Primitive
+#               alphabet, the gauge family AND its evaluation, the move-kind
+#               witnesses, power evaluation, and the `Safe<G, N>` typestate.
+#               Depends on dictionary only. NB: gauge *declaration* and
+#               *eval* live together here. Rust's orphan rule forbids
+#               `impl Gauge for SumTopK` from a crate owning neither the
+#               trait nor the type, so the old decl-in-dictionary /
+#               eval-in-laboratory split cannot survive a crate boundary;
+#               likewise the `pub(crate)` seal needs the Primitive trait and
+#               its impls in one crate. The split made these module-only
+#               idioms illegal — exactly the latent smell flagged earlier.
 #
-#   planners:   reference scheduler implementations. Strictly above
-#               laboratory; consumes the move alphabet and Safe<G, N>.
+#   planners (crate fulcrum): reference scheduler implementations. Strictly
+#               above laboratory; consumes the move alphabet and Safe<G, N>.
 #               Pure (no IO); randomness must be deterministically seeded.
 #
-#   hands:      IO-touching code. CSV parsing, replay support, the cluster
-#               twin. May import anywhere (including planners — the twin
-#               drives them). The only layer permitted to do file_io.
+#   hands (crate fulcrum): IO-touching code. CSV parsing, replay support, the
+#               cluster twin. May import anywhere. The only layer permitted
+#               to do file_io. (Planners + hands share the umbrella `fulcrum`
+#               crate for now; carving them into their own crates is next.)
 
 layers:
   dictionary:
-    role: "Data types, gauges, alphabet declarations"
+    role: "Data types — the nouns (crate fulcrum-dictionary)"
     packages:
-      - "src/alphabet.rs"
-      - "src/cluster.rs"
-      - "src/gauge.rs"
-      - "src/load.rs"
-      - "src/power.rs"
-      - "src/trace.rs"
+      - "crates/fulcrum-dictionary/src/cluster.rs"
+      - "crates/fulcrum-dictionary/src/load.rs"
+      - "crates/fulcrum-dictionary/src/power.rs"
+      - "crates/fulcrum-dictionary/src/trace.rs"
     rules:
       purity: strict
     depends_on: []
 
   laboratory:
-    role: "Algebraic move kinds, typestate, gauge/power evaluation, apply impls"
+    role: "Sealed alphabet, gauges + eval, move kinds, typestate, apply impls (crate fulcrum-laboratory)"
     packages:
-      - "src/gauge_eval.rs"
-      - "src/move_kind.rs"
-      - "src/power_eval.rs"
-      - "src/safe.rs"
+      - "crates/fulcrum-laboratory/src/alphabet.rs"
+      - "crates/fulcrum-laboratory/src/gauge.rs"
+      - "crates/fulcrum-laboratory/src/gauge_eval.rs"
+      - "crates/fulcrum-laboratory/src/move_kind.rs"
+      - "crates/fulcrum-laboratory/src/power_eval.rs"
+      - "crates/fulcrum-laboratory/src/safe.rs"
     rules:
       purity: strict
     depends_on: [dictionary]

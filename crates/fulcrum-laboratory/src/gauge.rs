@@ -37,7 +37,7 @@
 //! Common gauges are exposed as type aliases: `Linfty<N> = SumTopK<1, N>`
 //! is the worst-machine, worst-dimension utilization.
 
-use crate::load::Fleet;
+use fulcrum_dictionary::load::Fleet;
 
 mod sealed {
     pub trait Sealed {}
@@ -150,7 +150,7 @@ impl<const K: usize, const N: usize> SchurConvex<N> for WeightedKyFan<K, N> {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::load::{Capacity, Fleet, MachineId, Mass};
+    use fulcrum_dictionary::load::{Capacity, Fleet, MachineId, Mass};
 
     fn fleet1_uniform(loads: &[(u64, u64)], capacity: u64) -> Fleet<1> {
         let mut f = Fleet::new();

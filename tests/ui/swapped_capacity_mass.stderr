@@ -7,7 +7,7 @@ error[E0308]: arguments to this method are incorrect
    |                                 expected `Capacity<1>`, found `Mass<1>`
    |
 note: method defined here
-  --> src/load.rs
+  --> crates/fulcrum-dictionary/src/load.rs
    |
    |     pub fn add_machine(&mut self, id: MachineId, capacity: Capacity<N>, initial_load: Mass<N>) {
    |            ^^^^^^^^^^^

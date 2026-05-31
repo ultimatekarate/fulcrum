@@ -10,7 +10,7 @@
 //! fallible — the runtime check is at the apply site, visible to readers.
 
 use crate::gauge::SchurConvex;
-use crate::load::{Fleet, FleetError};
+use fulcrum_dictionary::load::{Fleet, FleetError};
 use crate::move_kind::{ColdToHot, HotToCold, Neutral, Place, Remove};
 
 /// Errors arising from `Safe<G, N>` operations.
@@ -174,7 +174,7 @@ impl<const N: usize> Place<N> {
 mod tests {
     use super::*;
     use crate::gauge::{Linfty, WeightedKyFan};
-    use crate::load::{Capacity, Fleet, MachineId, Mass};
+    use fulcrum_dictionary::load::{Capacity, Fleet, MachineId, Mass};
 
     fn fleet_3x100_loads(a: u64, b: u64, c: u64) -> Fleet<1> {
         let mut f = Fleet::new();

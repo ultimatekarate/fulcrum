@@ -16,11 +16,11 @@
 
 use std::collections::HashMap;
 
-use crate::gauge::SchurConvex;
-use crate::load::{Capacity, Fleet, MachineId, Mass};
-use crate::move_kind::{ColdToHot, HotToCold, Neutral, Place, Remove};
-use crate::safe::{GaugeError, Safe};
-use crate::trace::{MoveHistory, MoveRecord};
+use fulcrum_laboratory::gauge::SchurConvex;
+use fulcrum_dictionary::load::{Capacity, Fleet, MachineId, Mass};
+use fulcrum_laboratory::move_kind::{ColdToHot, HotToCold, Neutral, Place, Remove};
+use fulcrum_laboratory::safe::{GaugeError, Safe};
+use fulcrum_dictionary::trace::{MoveHistory, MoveRecord};
 
 /// What kind of state-changing event this is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -412,7 +412,7 @@ pub fn parse_csv(path: &std::path::Path) -> Result<(Vec<ParsedEvent>, u64), Box<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gauge::Linfty;
+    use fulcrum_laboratory::gauge::Linfty;
 
     fn ev_schedule(time: u64, inst: &str, machine: u64, mass: u64) -> ParsedEvent {
         ParsedEvent {

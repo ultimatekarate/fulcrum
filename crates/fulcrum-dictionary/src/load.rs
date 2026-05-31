@@ -204,8 +204,15 @@ impl<const N: usize> Fleet<N> {
         self.machines.is_empty()
     }
 
-    /// Crate-internal: add `mass` componentwise to a machine's load.
-    pub(crate) fn add_load(&mut self, id: MachineId, mass: Mass<N>) -> Result<(), FleetError> {
+    /// Workspace-internal: add `mass` componentwise to a machine's load.
+    ///
+    /// `#[doc(hidden)] pub` rather than `pub(crate)` only because the
+    /// laboratory's `apply` impls live in a sibling crate and must call it.
+    /// This is *not* a public mutation path: the real guarantee is that
+    /// `Safe` never hands out `&mut Fleet`, so no consumer can reach this on
+    /// a fleet that is under a gauge invariant.
+    #[doc(hidden)]
+    pub fn add_load(&mut self, id: MachineId, mass: Mass<N>) -> Result<(), FleetError> {
         let spec = self.machines.get_mut(&id).ok_or(FleetError::UnknownMachine(id))?;
         for d in 0..N {
             spec.load.0[d] = spec.load.0[d].saturating_add(mass.0[d]);
@@ -213,9 +220,12 @@ impl<const N: usize> Fleet<N> {
         Ok(())
     }
 
-    /// Crate-internal: subtract `mass` componentwise from a machine's load.
-    /// Errors if any dimension would underflow.
-    pub(crate) fn remove_load(&mut self, id: MachineId, mass: Mass<N>) -> Result<(), FleetError> {
+    /// Workspace-internal: subtract `mass` componentwise from a machine's
+    /// load. Errors if any dimension would underflow. `#[doc(hidden)] pub`
+    /// for the same reason as [`Fleet::add_load`] — the laboratory's `apply`
+    /// impls are a sibling crate.
+    #[doc(hidden)]
+    pub fn remove_load(&mut self, id: MachineId, mass: Mass<N>) -> Result<(), FleetError> {
         let spec = self.machines.get_mut(&id).ok_or(FleetError::UnknownMachine(id))?;
         for d in 0..N {
             if spec.load.0[d] < mass.0[d] {

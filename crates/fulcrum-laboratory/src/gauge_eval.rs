@@ -12,7 +12,7 @@
 //! nothing needs to name the module path.
 
 use crate::gauge::{Gauge, SumTopK, WeightedKyFan};
-use crate::load::Fleet;
+use fulcrum_dictionary::load::Fleet;
 use std::cmp::Ordering;
 
 /// Descending f64 comparator, matching the original

@@ -1,0 +1,11 @@
+[package]
+name = "fulcrum-dictionary"
+version = "0.0.1"
+edition = "2021"
+description = "Fulcrum dictionary: inert data types (load, capacity, power, topology, trace)."
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "fulcrum_dictionary"
+path = "src/lib.rs"

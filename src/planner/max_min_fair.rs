@@ -25,11 +25,11 @@
 //! theory (Marshall-Olkin §15) to pick mass that targets the *joint*
 //! utilization gap across dims; deferred.
 
-use crate::gauge::SchurConvex;
-use crate::load::{Fleet, MachineId, Mass};
-use crate::move_kind::HotToCold;
+use fulcrum_laboratory::gauge::SchurConvex;
+use fulcrum_dictionary::load::{Fleet, MachineId, Mass};
+use fulcrum_laboratory::move_kind::HotToCold;
 use crate::planner::{Planner, TypedMove};
-use crate::safe::Safe;
+use fulcrum_laboratory::safe::Safe;
 
 /// What `MaxMinFair` would do with one ordered `(src, dst)` pair — the entire
 /// per-pair decision, factored out of [`MaxMinFair::step`] so the planner and
