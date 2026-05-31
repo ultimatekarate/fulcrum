@@ -34,6 +34,10 @@ path = "examples/bench_rebalance_ratio.rs"
 name = "bench_defensive"
 path = "examples/bench_defensive.rs"
 
+[[example]]
+name = "bench_distributed"
+path = "examples/bench_distributed.rs"
+
 [dependencies]
 csv = "1.3"
 
