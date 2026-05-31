@@ -22,6 +22,10 @@ path = "examples/borg_replay.rs"
 name = "cluster_twin"
 path = "examples/cluster_twin.rs"
 
+[[example]]
+name = "bench_typed_pure"
+path = "examples/bench_typed_pure.rs"
+
 [dependencies]
 csv = "1.3"
 
