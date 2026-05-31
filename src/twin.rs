@@ -302,8 +302,16 @@ pub struct TwinReport {
 
 /// Run the reference Turing Pi 2 twin: build the topology, generate a seeded
 /// workload, place it least-loaded under the budget, then rebalance with
-/// `MaxMinFair`. Fixes the load gauge to `Linfty<4>` (worst-machine,
+/// `MaxMinFairGreedy`. Fixes the load gauge to `Linfty<4>` (worst-machine,
 /// worst-dimension utilization).
+///
+/// Phase B uses the *multi-pair* greedy rebalancer rather than single-pair
+/// `MaxMinFair`: the latter halts as soon as the global hottest/coldest pair
+/// is capacity-guard-blocked, which (measured, see [`compare_rebalancers`])
+/// strands admissible typed-pure transfers behind one blocked pair. The
+/// greedy planner relieves the hottest source that *can* shed, so the
+/// reference path makes the cheap (typed-pure) moves the single-pair planner
+/// left on the table.
 ///
 /// Returns an error only if the *empty* starting fleet somehow exceeds τ
 /// (it cannot, but the constructor is fallible).
@@ -323,7 +331,11 @@ pub fn run_turing_pi_2_twin(config: TwinConfig) -> Result<TwinReport, GaugeError
     sim.drive(&mut placer);
 
     // Phase B: rebalance (typed-pure `HotToCold`, power-non-increasing).
-    let mut rebalancer = MaxMinFair::new(config.rebalance_epsilon);
+    // Multi-pair greedy: unlike single-pair `MaxMinFair`, it does not halt
+    // when the global hottest/coldest pair is capacity-guard-blocked — it
+    // relieves the hottest source that *can* shed, so it doesn't strand
+    // admissible typed-pure transfers behind one blocked pair.
+    let mut rebalancer = MaxMinFairGreedy::new(config.rebalance_epsilon);
     sim.drive(&mut rebalancer);
 
     Ok(TwinReport {
@@ -633,5 +645,26 @@ mod tests {
         let mut a = WorkloadGen::new(42, [100, 100, 100, 100]);
         let mut b = WorkloadGen::new(42, [100, 100, 100, 100]);
         assert_eq!(a.take(10), b.take(10));
+    }
+
+    /// The reference twin's Phase B is `MaxMinFairGreedy`. Its final state must
+    /// match the greedy arm of [`compare_rebalancers`] exactly — same seeded
+    /// post-placement fleet, same planner — which guards against a silent
+    /// revert to the single-pair `MaxMinFair` that stalls early. (Phase A is
+    /// `LeastLoaded`, which emits only `Place`, so every typed-pure move is a
+    /// Phase-B migration.)
+    #[test]
+    fn reference_twin_phase_b_is_greedy() {
+        let cfg = config();
+        let run = run_turing_pi_2_twin(cfg).unwrap();
+        let cmp = compare_rebalancers(cfg).unwrap();
+
+        assert!(
+            (run.final_gauge - cmp.greedy_gauge).abs() < 1e-12,
+            "reference final gauge {} != greedy arm {} (did Phase B revert to single-pair?)",
+            run.final_gauge,
+            cmp.greedy_gauge,
+        );
+        assert_eq!(run.stats.typed_pure_applied as usize, cmp.greedy_migrations);
     }
 }
