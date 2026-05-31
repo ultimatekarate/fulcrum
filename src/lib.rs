@@ -26,9 +26,13 @@
 //!   the Ky Fan gauge family and its evaluation, the move-kind witnesses,
 //!   power evaluation, and the `Safe<G, N>` typestate. Depends only on the
 //!   dictionary.
-//! - `fulcrum` (this crate) — the planners ([`planner`]) and the IO-facing
-//!   hands ([`twin`], [`replay`]), plus a flat re-export of the two lower
-//!   crates so `fulcrum::Mass`, `fulcrum::Safe`, etc. resolve unchanged.
+//! - [`fulcrum_planners`] — reference schedulers over the move alphabet.
+//!   Depends on dictionary + laboratory.
+//! - [`fulcrum_hands`] — the IO-facing simulation harness ([`twin`],
+//!   [`replay`]). Depends on every lower layer.
+//! - `fulcrum` (this crate) — a pure umbrella: a flat re-export of all four
+//!   layers so `fulcrum::Mass`, `fulcrum::Safe`, etc. resolve unchanged, plus
+//!   the examples and integration tests.
 //!
 //! The gauge declaration and its `eval` impls live *together* in the
 //! laboratory: Rust's orphan rule forbids `impl Gauge for SumTopK` from any
@@ -39,10 +43,8 @@
 // `fulcrum::gauge::Y`, `fulcrum::safe::Z`, … keep resolving.
 pub use fulcrum_dictionary::{cluster, load, power, trace};
 pub use fulcrum_laboratory::{alphabet, gauge, move_kind, power_eval, safe};
-
-pub mod planner;
-pub mod replay;
-pub mod twin;
+pub use fulcrum_planners as planner;
+pub use fulcrum_hands::{replay, twin};
 
 pub use alphabet::{Derived, Effect, Primitive};
 pub use cluster::{turing_pi_2, NodeProfile, ResourceDim, Topology};

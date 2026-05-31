@@ -28,7 +28,7 @@ use fulcrum_dictionary::cluster::turing_pi_2;
 use fulcrum_laboratory::gauge::{Linfty, SchurConvex};
 use fulcrum_dictionary::load::{Capacity, Fleet, MachineId, MachineSpec, Mass};
 use fulcrum_laboratory::move_kind::Remove;
-use crate::planner::{
+use fulcrum_planners::{
     evaluate_pair, LeastLoaded, MaxMinFair, MaxMinFairGreedy, PairVerdict, Planner, TypedMove,
 };
 use fulcrum_dictionary::power::{Power, PowerBudget, PowerCoeffs};

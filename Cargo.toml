@@ -1,5 +1,10 @@
 [workspace]
-members = ["crates/fulcrum-dictionary", "crates/fulcrum-laboratory"]
+members = [
+    "crates/fulcrum-dictionary",
+    "crates/fulcrum-laboratory",
+    "crates/fulcrum-planners",
+    "crates/fulcrum-hands",
+]
 
 [package]
 name = "fulcrum"
@@ -42,9 +47,10 @@ name = "bench_distributed"
 path = "examples/bench_distributed.rs"
 
 [dependencies]
-csv = "1.3"
 fulcrum-dictionary = { path = "crates/fulcrum-dictionary" }
 fulcrum-laboratory = { path = "crates/fulcrum-laboratory" }
+fulcrum-planners = { path = "crates/fulcrum-planners" }
+fulcrum-hands = { path = "crates/fulcrum-hands" }
 
 [dev-dependencies]
 trybuild = "1.0"

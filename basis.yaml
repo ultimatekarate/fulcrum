@@ -22,14 +22,18 @@ governance:
 #               its impls in one crate. The split made these module-only
 #               idioms illegal — exactly the latent smell flagged earlier.
 #
-#   planners (crate fulcrum): reference scheduler implementations. Strictly
-#               above laboratory; consumes the move alphabet and Safe<G, N>.
-#               Pure (no IO); randomness must be deterministically seeded.
+#   planners (crate fulcrum-planners): reference scheduler implementations.
+#               Strictly above laboratory; consumes the move alphabet and
+#               Safe<G, N>. Pure (no IO); randomness deterministically seeded.
 #
-#   hands (crate fulcrum): IO-touching code. CSV parsing, replay support, the
-#               cluster twin. May import anywhere. The only layer permitted
-#               to do file_io. (Planners + hands share the umbrella `fulcrum`
-#               crate for now; carving them into their own crates is next.)
+#   hands (crate fulcrum-hands): IO-touching code. CSV parsing, replay
+#               support, the cluster twin. May import anywhere. The only
+#               layer permitted to do file_io.
+#
+# The `fulcrum` crate is now a pure umbrella: it re-exports all four layers
+# (so `fulcrum::X` paths are stable) and hosts the examples and integration
+# tests. The production shell that drives real hardware lives in its own
+# crates (proto / agent / controller), not here.
 
 layers:
   dictionary:
@@ -57,22 +61,22 @@ layers:
     depends_on: [dictionary]
 
   planners:
-    role: "Reference scheduler implementations"
+    role: "Reference scheduler implementations (crate fulcrum-planners)"
     packages:
-      - "src/planner.rs"
-      - "src/planner/least_loaded.rs"
-      - "src/planner/power_of_two.rs"
-      - "src/planner/max_min_fair.rs"
-      - "src/planner/best_fit_decreasing.rs"
+      - "crates/fulcrum-planners/src/lib.rs"
+      - "crates/fulcrum-planners/src/least_loaded.rs"
+      - "crates/fulcrum-planners/src/power_of_two.rs"
+      - "crates/fulcrum-planners/src/max_min_fair.rs"
+      - "crates/fulcrum-planners/src/best_fit_decreasing.rs"
     rules:
       purity: strict
     depends_on: [dictionary, laboratory]
 
   hands:
-    role: "IO, parsing, replay support, the cluster twin"
+    role: "IO, parsing, replay support, the cluster twin (crate fulcrum-hands)"
     packages:
-      - "src/replay.rs"
-      - "src/twin.rs"
+      - "crates/fulcrum-hands/src/replay.rs"
+      - "crates/fulcrum-hands/src/twin.rs"
     depends_on: [dictionary, laboratory, planners]
 
 # Branded newtypes that must not be replaced with raw integers at API

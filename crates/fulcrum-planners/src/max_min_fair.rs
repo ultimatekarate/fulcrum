@@ -28,7 +28,7 @@
 use fulcrum_laboratory::gauge::SchurConvex;
 use fulcrum_dictionary::load::{Fleet, MachineId, Mass};
 use fulcrum_laboratory::move_kind::HotToCold;
-use crate::planner::{Planner, TypedMove};
+use crate::{Planner, TypedMove};
 use fulcrum_laboratory::safe::Safe;
 
 /// What `MaxMinFair` would do with one ordered `(src, dst)` pair — the entire

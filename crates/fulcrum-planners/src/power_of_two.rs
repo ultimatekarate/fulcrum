@@ -21,7 +21,7 @@ use std::collections::VecDeque;
 use fulcrum_laboratory::gauge::SchurConvex;
 use fulcrum_dictionary::load::Mass;
 use fulcrum_laboratory::move_kind::Place;
-use crate::planner::{Planner, TypedMove};
+use crate::{Planner, TypedMove};
 use fulcrum_laboratory::safe::Safe;
 
 pub struct PowerOfTwo<const N: usize> {

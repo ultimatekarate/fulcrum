@@ -1,0 +1,17 @@
+[package]
+name = "fulcrum-hands"
+version = "0.0.1"
+edition = "2021"
+description = "Fulcrum hands: IO-facing simulation harness — the cluster twin and Borg-trace replay."
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "fulcrum_hands"
+path = "src/lib.rs"
+
+[dependencies]
+csv = "1.3"
+fulcrum-dictionary = { path = "../fulcrum-dictionary" }
+fulcrum-laboratory = { path = "../fulcrum-laboratory" }
+fulcrum-planners = { path = "../fulcrum-planners" }
