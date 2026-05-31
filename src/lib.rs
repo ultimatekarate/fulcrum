@@ -62,14 +62,15 @@ pub use gauge::{Gauge, Linfty, SchurConvex, SumTopK, WeightedKyFan};
 pub use load::{Capacity, Fleet, MachineId, MachineSpec, Mass, Utilization};
 pub use move_kind::{ColdToHot, HotToCold, Neutral, Place, Remove};
 pub use planner::{
-    evaluate_pair, BestFitDecreasing, LeastLoaded, MaxMinFair, PairVerdict, Planner, PowerOfTwo,
-    TypedMove,
+    evaluate_pair, BestFitDecreasing, LeastLoaded, MaxMinFair, MaxMinFairGreedy, PairVerdict,
+    Planner, PowerOfTwo, TypedMove,
 };
 pub use power::{Power, PowerBudget, PowerCoeffs};
 pub use power_eval::{fleet_power, node_power};
 pub use safe::{GaugeError, Safe};
 pub use trace::{MoveHistory, MoveRecord};
 pub use twin::{
-    diagnose_turing_pi_2_rebalance, run_turing_pi_2_twin, timeline_to_csv, RebalanceStallReport,
-    Sim, SimStats, TimelineRow, TwinConfig, TwinReport, WorkloadGen,
+    compare_rebalancers, diagnose_turing_pi_2_rebalance, greedy_outcome, run_turing_pi_2_twin,
+    timeline_to_csv, GreedyOutcome, RebalanceComparison, RebalanceStallReport, Sim, SimStats,
+    TimelineRow, TwinConfig, TwinReport, WorkloadGen,
 };

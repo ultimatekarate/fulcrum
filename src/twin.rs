@@ -26,8 +26,10 @@
 
 use crate::cluster::turing_pi_2;
 use crate::gauge::{Linfty, SchurConvex};
-use crate::load::{Fleet, MachineId, Mass};
-use crate::planner::{evaluate_pair, LeastLoaded, MaxMinFair, PairVerdict, Planner, TypedMove};
+use crate::load::{Fleet, MachineId, MachineSpec, Mass};
+use crate::planner::{
+    evaluate_pair, LeastLoaded, MaxMinFair, MaxMinFairGreedy, PairVerdict, Planner, TypedMove,
+};
 use crate::power::{Power, PowerBudget};
 use crate::power_eval::fleet_power;
 use crate::safe::{GaugeError, Safe};
@@ -368,9 +370,11 @@ pub struct RebalanceStallReport {
 /// so behavior is unchanged). After the halt, every ordered machine pair is
 /// re-evaluated against the final fleet via the *same* [`evaluate_pair`] the
 /// planner uses — so the counterfactual cannot drift from the policy.
-pub fn diagnose_turing_pi_2_rebalance(
-    config: TwinConfig,
-) -> Result<RebalanceStallReport, GaugeError> {
+/// Stand up the fleet and run Phase A (least-loaded placement) only — the
+/// shared prefix of [`run_turing_pi_2_twin`], the stall diagnostic, and the
+/// rebalancer comparison. Deterministic in `config`, so callers that need the
+/// *same* post-placement state just call it again.
+fn placed_sim(config: TwinConfig) -> Result<Sim<Linfty<4>>, GaugeError> {
     let topo = turing_pi_2();
     let fleet: Fleet<4> = topo.fleet();
     let coeffs = topo.coeffs();
@@ -380,10 +384,15 @@ pub fn diagnose_turing_pi_2_rebalance(
     let items = gen.take(config.n_workloads);
 
     let mut sim = Sim::new(safe, coeffs, config.budget);
-
-    // Phase A: placement (identical to the reference twin).
     let mut placer = LeastLoaded::new(items);
     sim.drive(&mut placer);
+    Ok(sim)
+}
+
+pub fn diagnose_turing_pi_2_rebalance(
+    config: TwinConfig,
+) -> Result<RebalanceStallReport, GaugeError> {
+    let mut sim = placed_sim(config)?;
 
     // Phase B: instrumented rebalance.
     let mut rebalancer = MaxMinFair::new(config.rebalance_epsilon);
@@ -417,6 +426,148 @@ pub fn diagnose_turing_pi_2_rebalance(
         halt_scan,
         halted_gauge,
         halted_per_node,
+    })
+}
+
+/// Side-by-side result of the single-pair `MaxMinFair` baseline vs the
+/// multi-pair `MaxMinFairGreedy`, on the *same* post-placement fleet.
+///
+/// The decisive field is [`Self::greedy_residual_guard_blocked`]: once the
+/// greedy planner has made every admissible typed-pure transfer (so
+/// `greedy_residual_emits == 0`, planner coverage is spent), whatever remains
+/// capacity-guard-blocked is the **irreducible carrier residue** — the moves
+/// that only an *elastic* carrier could unlock. This is the clean separation
+/// the stall experiment asked for: planner coverage first, then what's left is
+/// purely about carriers.
+#[derive(Clone, Debug)]
+pub struct RebalanceComparison {
+    /// `MaxMinFair` (single global pair): migrations applied.
+    pub baseline_migrations: usize,
+    /// `MaxMinFair`: typed-pure ratio over the whole run (placements included).
+    pub baseline_ratio: f64,
+    /// `MaxMinFair`: load gauge at halt.
+    pub baseline_gauge: f64,
+    /// `MaxMinFairGreedy` (all pairs): migrations applied.
+    pub greedy_migrations: usize,
+    /// `MaxMinFairGreedy`: typed-pure ratio over the whole run.
+    pub greedy_ratio: f64,
+    /// `MaxMinFairGreedy`: load gauge at halt.
+    pub greedy_gauge: f64,
+    /// After greedy exhausts: the guard-blocked residue as `(src, dst, worst_d)`
+    /// — the pure carrier opportunity.
+    pub greedy_residual_guard_blocked: Vec<(MachineId, MachineId, usize)>,
+    /// After greedy exhausts: count of any `Emit` pairs still available. Should
+    /// be 0 — the greedy planner does not leave admissible moves on the table.
+    pub greedy_residual_emits: usize,
+}
+
+/// Run both rebalancers from the identical post-placement fleet and compare:
+/// how many more typed-pure moves the multi-pair planner makes, how much it
+/// lifts the typed-pure ratio, and — crucially — what stays capacity-guard
+/// blocked after it exhausts (the carrier residue).
+pub fn compare_rebalancers(config: TwinConfig) -> Result<RebalanceComparison, GaugeError> {
+    // Baseline: single-global-pair MaxMinFair.
+    let mut base = placed_sim(config)?;
+    let mut mmf = MaxMinFair::new(config.rebalance_epsilon);
+    base.drive(&mut mmf);
+    let baseline_migrations = base.stats().typed_pure_applied as usize;
+    let baseline_ratio = base.history().typed_pure_ratio();
+    let baseline_gauge = base.safe().gauge();
+
+    // Multi-pair greedy, from the same Phase-A state (deterministic re-run).
+    let mut greedy_sim = placed_sim(config)?;
+    let mut greedy = MaxMinFairGreedy::new(config.rebalance_epsilon);
+    greedy_sim.drive(&mut greedy);
+    let greedy_migrations = greedy_sim.stats().typed_pure_applied as usize;
+    let greedy_ratio = greedy_sim.history().typed_pure_ratio();
+    let greedy_gauge = greedy_sim.safe().gauge();
+
+    // The residue after greedy exhausts: what's still guard-blocked (carrier
+    // opportunity) and a sanity count of any Emit left (must be 0).
+    let halted = greedy_sim.safe().fleet();
+    let ids: Vec<MachineId> = halted.iter().map(|(id, _)| id).collect();
+    let mut greedy_residual_guard_blocked = Vec::new();
+    let mut greedy_residual_emits = 0usize;
+    for &src in &ids {
+        for &dst in &ids {
+            if src == dst {
+                continue;
+            }
+            match evaluate_pair(halted, src, dst, config.rebalance_epsilon) {
+                PairVerdict::GuardBlocked { worst_d, .. } => {
+                    greedy_residual_guard_blocked.push((src, dst, worst_d));
+                }
+                PairVerdict::Emit { .. } => greedy_residual_emits += 1,
+                _ => {}
+            }
+        }
+    }
+
+    Ok(RebalanceComparison {
+        baseline_migrations,
+        baseline_ratio,
+        baseline_gauge,
+        greedy_migrations,
+        greedy_ratio,
+        greedy_gauge,
+        greedy_residual_guard_blocked,
+        greedy_residual_emits,
+    })
+}
+
+/// The fully-rebalanced (post-`MaxMinFairGreedy`) fleet, with everything a
+/// caller needs to ask whether the leftover residue actually *matters*: the
+/// per-machine specs (load + capacity, so both utilization and **absolute** free
+/// capacity are recoverable), the node power coefficients, the gauge, the
+/// threshold, and the guard-blocked residue.
+#[derive(Clone, Debug)]
+pub struct GreedyOutcome {
+    /// Post-greedy per-machine specs, ascending id (parallel to `coeffs`).
+    pub specs: Vec<(MachineId, MachineSpec<4>)>,
+    /// Per-node power coefficients, parallel to `specs`.
+    pub coeffs: Vec<crate::power::PowerCoeffs>,
+    /// Load gauge (worst-machine worst-dim utilization) at the stuck state.
+    pub gauge: f64,
+    /// The `Safe` threshold τ — the only hard bound the residue must respect.
+    pub threshold: f64,
+    /// Capacity-guard residue as `(src, dst, worst_d)` (the stuck transfers).
+    pub residual_guard_blocked: Vec<(MachineId, MachineId, usize)>,
+}
+
+/// Drive the fleet to the multi-pair-greedy stuck state and hand back the full
+/// post-rebalance snapshot, so callers can measure the operational significance
+/// of whatever residue remains (safety headroom, absolute free capacity,
+/// admission slack) rather than just its existence.
+pub fn greedy_outcome(config: TwinConfig) -> Result<GreedyOutcome, GaugeError> {
+    let mut sim = placed_sim(config)?;
+    let mut greedy = MaxMinFairGreedy::new(config.rebalance_epsilon);
+    sim.drive(&mut greedy);
+
+    let gauge = sim.safe().gauge();
+    let fleet = sim.safe().fleet();
+    let specs: Vec<(MachineId, MachineSpec<4>)> = fleet.iter().map(|(id, s)| (id, *s)).collect();
+
+    let ids: Vec<MachineId> = fleet.iter().map(|(id, _)| id).collect();
+    let mut residual_guard_blocked = Vec::new();
+    for &src in &ids {
+        for &dst in &ids {
+            if src == dst {
+                continue;
+            }
+            if let PairVerdict::GuardBlocked { worst_d, .. } =
+                evaluate_pair(fleet, src, dst, config.rebalance_epsilon)
+            {
+                residual_guard_blocked.push((src, dst, worst_d));
+            }
+        }
+    }
+
+    Ok(GreedyOutcome {
+        specs,
+        coeffs: turing_pi_2().coeffs(),
+        gauge,
+        threshold: config.threshold,
+        residual_guard_blocked,
     })
 }
 

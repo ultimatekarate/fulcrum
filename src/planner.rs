@@ -43,7 +43,7 @@ pub mod power_of_two;
 
 pub use best_fit_decreasing::BestFitDecreasing;
 pub use least_loaded::LeastLoaded;
-pub use max_min_fair::{evaluate_pair, MaxMinFair, PairVerdict};
+pub use max_min_fair::{evaluate_pair, MaxMinFair, MaxMinFairGreedy, PairVerdict};
 pub use power_of_two::PowerOfTwo;
 
 use crate::gauge::SchurConvex;

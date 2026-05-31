@@ -203,3 +203,86 @@ impl<const N: usize, G: SchurConvex<N>> Planner<N, G> for MaxMinFair {
         }
     }
 }
+
+/// Multi-pair max-min-fair rebalancer — the planner-coverage fix the stall
+/// experiment pointed at (`examples/rebalance_stalls.rs`).
+///
+/// [`MaxMinFair`] only ever tries the single global (max-util, min-util) pair;
+/// the moment that pair's binding dimension is capacity-guard blocked it halts,
+/// **leaving admissible typed-pure transfers on the table**. This variant scans
+/// every ordered pair each step and emits the admissible Robin-Hood transfer
+/// that relieves the *hottest source able to shed* (ties broken toward the
+/// coldest destination, then by ascending id for determinism). It halts only
+/// when no pair admits a transfer.
+///
+/// Two properties carry over for free from the algebra:
+/// - **Correctness**: every emitted move is a witnessed `HotToCold`, so `apply`
+///   is total and the gauge bound is preserved by the type system — exactly as
+///   for `MaxMinFair`. The extra coverage cannot make an unsafe move.
+/// - **Termination**: each emitted move is a Robin-Hood transfer in a single
+///   dimension, which strictly decreases `Σ_{i,d} u_{i,d}²` on a discrete
+///   (integer-load) grid; the move sequence is therefore finite.
+///
+/// Honest caveat: under a worst-machine gauge (`Linfty`), once the global max
+/// cannot shed, the additional moves relieve *sub-dominant* machines — genuine
+/// max-min-fair progress (and a real `Σu²` decrease) that `Linfty` is too coarse
+/// to register. So this lifts the typed-pure ratio and improves balance, but the
+/// headline `Linfty` value may plateau; a Ky-Fan gauge would show the gain.
+pub struct MaxMinFairGreedy {
+    epsilon: f64,
+}
+
+impl MaxMinFairGreedy {
+    /// Construct with the convergence threshold `epsilon` (same meaning as
+    /// [`MaxMinFair::new`]).
+    pub fn new(epsilon: f64) -> Self {
+        Self { epsilon }
+    }
+}
+
+impl<const N: usize, G: SchurConvex<N>> Planner<N, G> for MaxMinFairGreedy {
+    fn step(&mut self, safe: &Safe<G, N>) -> Option<TypedMove<N>> {
+        let fleet = safe.fleet();
+        if fleet.len() < 2 {
+            return None;
+        }
+        let ids: Vec<MachineId> = fleet.iter().map(|(id, _)| id).collect();
+
+        // Among all admissible (Emit) pairs, relieve the hottest source that can
+        // shed; tie-break toward the coldest destination, then ascending id
+        // (the `ids` are ascending, and ties keep the first found).
+        // best = (src, dst, worst_d, mass, src_u, dst_u)
+        let mut best: Option<(MachineId, MachineId, usize, u64, f64, f64)> = None;
+        for &src in &ids {
+            let src_u = match fleet.spec(src) {
+                Some(s) => s.worst_utilization(),
+                None => continue,
+            };
+            for &dst in &ids {
+                if src == dst {
+                    continue;
+                }
+                if let PairVerdict::Emit { worst_d, mass } =
+                    evaluate_pair(fleet, src, dst, self.epsilon)
+                {
+                    let dst_u = fleet.spec(dst).map(|s| s.worst_utilization()).unwrap_or(0.0);
+                    let better = match best {
+                        None => true,
+                        Some((_, _, _, _, b_src_u, b_dst_u)) => {
+                            src_u > b_src_u || (src_u == b_src_u && dst_u < b_dst_u)
+                        }
+                    };
+                    if better {
+                        best = Some((src, dst, worst_d, mass, src_u, dst_u));
+                    }
+                }
+            }
+        }
+
+        let (src, dst, worst_d, mass, _, _) = best?;
+        let mut mass_arr = [0u64; N];
+        mass_arr[worst_d] = mass;
+        let m = HotToCold::witness(src, dst, Mass(mass_arr), fleet)?;
+        Some(TypedMove::HotToCold(m))
+    }
+}

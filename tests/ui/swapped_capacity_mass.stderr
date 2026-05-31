@@ -1,0 +1,18 @@
+error[E0308]: arguments to this method are incorrect
+  --> tests/ui/swapped_capacity_mass.rs:11:7
+   |
+11 |     f.add_machine(MachineId(1), Mass([100]), Capacity([50]));
+   |       ^^^^^^^^^^^               -----------  -------------- expected `Mass<1>`, found `Capacity<1>`
+   |                                 |
+   |                                 expected `Capacity<1>`, found `Mass<1>`
+   |
+note: method defined here
+  --> src/load.rs
+   |
+   |     pub fn add_machine(&mut self, id: MachineId, capacity: Capacity<N>, initial_load: Mass<N>) {
+   |            ^^^^^^^^^^^
+help: swap these arguments
+   |
+11 -     f.add_machine(MachineId(1), Mass([100]), Capacity([50]));
+11 +     f.add_machine(MachineId(1), Capacity([50]), Mass([100]));
+   |
