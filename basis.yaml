@@ -89,6 +89,16 @@ layers:
       purity: strict
     depends_on: [dictionary]
 
+  controller:
+    role: "The authority — desired Safe<G,N>, placement, reconcile loop (crate fulcrum-controller)"
+    # Pure: the controller's own code does no IO. All IO is behind the
+    # SledAgent trait, implemented by agents in their own (impure) crates.
+    packages:
+      - "crates/fulcrum-controller/src/lib.rs"
+    rules:
+      purity: strict
+    depends_on: [dictionary, laboratory, proto]
+
 # Branded newtypes that must not be replaced with raw integers at API
 # boundaries. The point: a function that takes `u64` could mean anything;
 # a function that takes `Mass` cannot be passed a MachineId by accident.

@@ -10,7 +10,7 @@
 //! fallible — the runtime check is at the apply site, visible to readers.
 
 use crate::gauge::SchurConvex;
-use fulcrum_dictionary::load::{Fleet, FleetError};
+use fulcrum_dictionary::load::{Fleet, FleetError, MachineId, Mass};
 use crate::move_kind::{ColdToHot, HotToCold, Neutral, Place, Remove};
 
 /// Errors arising from `Safe<G, N>` operations.
@@ -89,6 +89,28 @@ impl<G: SchurConvex<N>, const N: usize> Safe<G, N> {
     /// the gauge — the move's totality argument is the proof.
     fn rebuild_total(fleet: Fleet<N>, threshold: f64, gauge: G) -> Self {
         Safe { fleet, threshold, gauge }
+    }
+
+    /// Place `mass` on `machine`, mutating the fleet in place **iff** the
+    /// result stays within threshold. On a fleet error or threshold
+    /// violation the `Safe` is left unchanged and the error is returned.
+    ///
+    /// This is the stateful-owner counterpart to [`Place::apply_with_recheck`]
+    /// (which consumes the `Safe` and is lost on failure). A long-lived
+    /// authority — the controller — holds one `Safe` and probes candidate
+    /// nodes with this, never losing its proof when a placement is rejected.
+    /// Same safety check, same `ThresholdExceeded` semantics; only the
+    /// ownership shape differs.
+    pub fn try_place(&mut self, machine: MachineId, mass: Mass<N>) -> Result<(), GaugeError> {
+        let mut trial = self.fleet.clone();
+        trial.add_load(machine, mass)?;
+        let value = self.gauge.eval(&trial);
+        if value <= self.threshold {
+            self.fleet = trial;
+            Ok(())
+        } else {
+            Err(GaugeError::ThresholdExceeded { value, threshold: self.threshold })
+        }
     }
 }
 

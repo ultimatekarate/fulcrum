@@ -1,0 +1,16 @@
+[package]
+name = "fulcrum-controller"
+version = "0.0.1"
+edition = "2021"
+description = "Fulcrum controller: the authority — holds the gauge-safe desired state, places and reconciles."
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "fulcrum_controller"
+path = "src/lib.rs"
+
+[dependencies]
+fulcrum-dictionary = { path = "../fulcrum-dictionary" }
+fulcrum-laboratory = { path = "../fulcrum-laboratory" }
+fulcrum-proto = { path = "../fulcrum-proto" }
