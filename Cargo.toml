@@ -4,6 +4,7 @@ members = [
     "crates/fulcrum-laboratory",
     "crates/fulcrum-planners",
     "crates/fulcrum-hands",
+    "crates/fulcrum-proto",
 ]
 
 [package]

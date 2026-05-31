@@ -1,0 +1,14 @@
+[package]
+name = "fulcrum-proto"
+version = "0.0.1"
+edition = "2021"
+description = "Fulcrum governor protocol: the controller<->agent wire nouns and the SledAgent contract."
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "fulcrum_proto"
+path = "src/lib.rs"
+
+[dependencies]
+fulcrum-dictionary = { path = "../fulcrum-dictionary" }

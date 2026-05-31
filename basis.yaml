@@ -79,6 +79,16 @@ layers:
       - "crates/fulcrum-hands/src/twin.rs"
     depends_on: [dictionary, laboratory, planners]
 
+  # --- Governor subsystem (the production shell that drives real hardware).
+  # Begins here with the protocol; the agent and controller crates follow.
+  proto:
+    role: "Governor protocol — controller<->agent wire nouns + SledAgent contract (crate fulcrum-proto)"
+    packages:
+      - "crates/fulcrum-proto/src/lib.rs"
+    rules:
+      purity: strict
+    depends_on: [dictionary]
+
 # Branded newtypes that must not be replaced with raw integers at API
 # boundaries. The point: a function that takes `u64` could mean anything;
 # a function that takes `Mass` cannot be passed a MachineId by accident.
